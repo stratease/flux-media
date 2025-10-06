@@ -9,7 +9,7 @@
 namespace FluxMedia\Core;
 
 use FluxMedia\Admin\Admin;
-use FluxMedia\Api\RestApi;
+use FluxMedia\Api\RestApiManager;
 use FluxMedia\Services\ImageConverter;
 use FluxMedia\Services\VideoConverter;
 use FluxMedia\Services\ConversionTracker;
@@ -67,6 +67,9 @@ class Plugin {
 	 * @since 1.0.0
 	 */
 	private function init_services() {
+		// Create database tables.
+		$this->create_database_tables();
+
 		// Register services in container.
 		$this->container->set( 'logger', new Logger() );
 		$this->container->set( 'image_converter', new ImageConverter( $this->container->get( 'logger' ) ) );
@@ -90,8 +93,8 @@ class Plugin {
 	 * @since 1.0.0
 	 */
 	private function init_rest_api() {
-		$rest_api = new RestApi( $this->container );
-		$rest_api->init();
+		$rest_api_manager = new RestApiManager( $this->container );
+		$rest_api_manager->init();
 	}
 
 	/**
@@ -129,8 +132,54 @@ class Plugin {
 			return;
 		}
 
-		// Schedule async conversion.
-		wp_schedule_single_event( time() + 30, 'flux_media_convert_attachment', [ $attachment_id ] );
+		// Handle image conversion
+		if ( strpos( $mime_type, 'image/' ) === 0 ) {
+			$this->process_image_upload( $attachment_id );
+		}
+
+		// Handle video conversion (for future implementation)
+		if ( strpos( $mime_type, 'video/' ) === 0 ) {
+			// TODO: Implement video conversion on upload
+			// For now, just log that video was uploaded
+			$logger = $this->container->get( 'logger' );
+			$logger->info( "Video uploaded: {$attachment_id} (conversion not yet implemented)" );
+		}
+	}
+
+	/**
+	 * Process image upload - convert to WebP/AVIF.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id The attachment ID.
+	 */
+	private function process_image_upload( $attachment_id ) {
+		try {
+			$image_converter = $this->container->get( 'image_converter' );
+			
+			// Check if image conversion is available
+			if ( ! $image_converter->is_available() ) {
+				$logger = $this->container->get( 'logger' );
+				$logger->warning( "Image conversion not available for attachment: {$attachment_id}" );
+				return;
+			}
+
+			// Process the uploaded image
+			$results = $image_converter->process_uploaded_image( $attachment_id );
+
+			if ( $results['success'] ) {
+				$logger = $this->container->get( 'logger' );
+				$formats = implode( ', ', $results['converted_formats'] );
+				$logger->info( "Successfully converted image {$attachment_id} to: {$formats}" );
+			} else {
+				$logger = $this->container->get( 'logger' );
+				$errors = implode( ', ', $results['errors'] );
+				$logger->warning( "Failed to convert image {$attachment_id}: {$errors}" );
+			}
+
+		} catch ( \Exception $e ) {
+			$logger = $this->container->get( 'logger' );
+			$logger->error( "Exception during image conversion for attachment {$attachment_id}: {$e->getMessage()}" );
+		}
 	}
 
 	/**
@@ -150,5 +199,35 @@ class Plugin {
 	 */
 	public function cleanup_old_files() {
 		// TODO: Implement cleanup of old temporary files.
+	}
+
+	/**
+	 * Create database tables for the plugin.
+	 *
+	 * @since 1.0.0
+	 */
+	private function create_database_tables() {
+		global $wpdb;
+
+		$table_name = $wpdb->prefix . 'flux_media_logs';
+		
+		$charset_collate = $wpdb->get_charset_collate();
+
+		$sql = "CREATE TABLE $table_name (
+			id bigint(20) NOT NULL AUTO_INCREMENT,
+			level varchar(20) NOT NULL,
+			message text NOT NULL,
+			context longtext,
+			created_at datetime DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (id),
+			KEY level (level),
+			KEY created_at (created_at)
+		) $charset_collate;";
+
+		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+		dbDelta( $sql );
+
+		// Store the database version for future updates
+		update_option( 'flux_media_db_version', '1.0.0' );
 	}
 }

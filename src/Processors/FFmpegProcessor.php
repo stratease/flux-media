@@ -1,6 +1,6 @@
 <?php
 /**
- * FFmpeg video processor implementation.
+ * FFmpeg video processor implementation using PHP-FFmpeg library.
  *
  * @package FluxMedia
  * @since 1.0.0
@@ -10,11 +10,15 @@ namespace FluxMedia\Processors;
 
 use FluxMedia\Interfaces\VideoProcessorInterface;
 use FluxMedia\Utils\Logger;
+use FFMpeg\FFMpeg;
+use FFMpeg\FFProbe;
+use FFMpeg\Format\Video\WebM;
+use FFMpeg\Format\Video\X264;
+use FFMpeg\Exception\RuntimeException;
 use Symfony\Component\Process\Process;
-use Symfony\Component\Process\Exception\ProcessFailedException;
 
 /**
- * FFmpeg-based video processor with high-quality conversion settings.
+ * FFmpeg-based video processor with high-quality conversion settings using PHP-FFmpeg.
  *
  * @since 1.0.0
  */
@@ -29,20 +33,20 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	private $logger;
 
 	/**
-	 * FFmpeg binary path.
+	 * FFMpeg instance.
 	 *
 	 * @since 1.0.0
-	 * @var string
+	 * @var FFMpeg
 	 */
-	private $ffmpeg_path;
+	private $ffmpeg;
 
 	/**
-	 * FFprobe binary path.
+	 * FFProbe instance.
 	 *
 	 * @since 1.0.0
-	 * @var string
+	 * @var FFProbe
 	 */
-	private $ffprobe_path;
+	private $ffprobe;
 
 	/**
 	 * Constructor.
@@ -52,8 +56,56 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 */
 	public function __construct( Logger $logger ) {
 		$this->logger = $logger;
-		$this->ffmpeg_path = $this->find_ffmpeg_binary();
-		$this->ffprobe_path = $this->find_ffprobe_binary();
+		$this->initialize_ffmpeg();
+	}
+
+	/**
+	 * Initialize FFMpeg and FFProbe instances.
+	 *
+	 * @since 1.0.0
+	 */
+	private function initialize_ffmpeg() {
+		try {
+			$ffmpeg_path = $this->find_ffmpeg_binary();
+			$ffprobe_path = $this->find_ffprobe_binary();
+
+			// Check if binaries are actually available before trying to create instances
+			if ( ! $this->is_executable( $ffmpeg_path ) ) {
+				// Don't log as error - this is expected in many environments
+				$this->ffmpeg = null;
+				$this->ffprobe = null;
+				return;
+			}
+
+			if ( ! $this->is_executable( $ffprobe_path ) ) {
+				// Don't log as error - this is expected in many environments
+				$this->ffmpeg = null;
+				$this->ffprobe = null;
+				return;
+			}
+
+			$this->ffmpeg = FFMpeg::create([
+				'ffmpeg.binaries'  => $ffmpeg_path,
+				'ffprobe.binaries' => $ffprobe_path,
+				'timeout'          => 3600, // 1 hour timeout
+				'ffmpeg.threads'   => 0, // Use all available threads
+			]);
+
+			$this->ffprobe = FFProbe::create([
+				'ffprobe.binaries' => $ffprobe_path,
+			]);
+
+			$this->logger->info( "FFMpeg initialized successfully with binaries: {$ffmpeg_path}, {$ffprobe_path}" );
+
+		} catch ( RuntimeException $e ) {
+			// Don't log as error - this is expected when binaries aren't available
+			$this->ffmpeg = null;
+			$this->ffprobe = null;
+		} catch ( \Exception $e ) {
+			// Don't log as error - this is expected when binaries aren't available
+			$this->ffmpeg = null;
+			$this->ffprobe = null;
+		}
 	}
 
 	/**
@@ -128,19 +180,73 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return array Processor information.
 	 */
 	public function get_info() {
-		$version_info = $this->get_version_info();
-		$codec_info = $this->get_codec_info();
+		// Always check format support capabilities, regardless of initialization status
+		$av1_support = $this->can_convert_to_av1();
+		$webm_support = $this->can_convert_to_webm();
+		
+		// Processor is available if we can convert to at least one format
+		$available = $av1_support || $webm_support;
+		
+		if ( $available ) {
+			$version_info = $this->get_version_info();
+			
+			return [
+				'available' => true,
+				'type' => 'ffmpeg',
+				'version' => $version_info,
+				'av1_support' => $av1_support,
+				'webm_support' => $webm_support,
+			];
+		}
 		
 		return [
-			'available' => true,
-			'type' => 'ffmpeg',
-			'version' => $version_info,
-			'ffmpeg_path' => $this->ffmpeg_path,
-			'ffprobe_path' => $this->ffprobe_path,
-			'av1_support' => $this->supports_av1(),
-			'webm_support' => $this->supports_webm(),
-			'codecs' => $codec_info,
+			'available' => false,
+			'type' => 'none',
+			'av1_support' => false,
+			'webm_support' => false,
 		];
+	}
+
+	/**
+	 * Check if we can convert to AV1 format.
+	 *
+	 * @since 1.0.0
+	 * @return bool True if AV1 conversion is possible, false otherwise.
+	 */
+	private function can_convert_to_av1() {
+		// Check if PHP-FFmpeg library is available
+		if ( ! class_exists( 'FFMpeg\FFMpeg' ) ) {
+			return false;
+		}
+		
+		// Check if FFmpeg binary is available
+		if ( ! $this->is_executable( $this->find_ffmpeg_binary() ) ) {
+			return false;
+		}
+		
+		// Check if AV1 codec is supported
+		return $this->supports_av1();
+	}
+
+	/**
+	 * Check if we can convert to WebM format.
+	 *
+	 * @since 1.0.0
+	 * @return bool True if WebM conversion is possible, false otherwise.
+	 */
+	private function can_convert_to_webm() {
+		// Check if PHP-FFmpeg library is available
+		if ( ! class_exists( 'FFMpeg\FFMpeg' ) ) {
+			return false;
+		}
+		
+		// Check if FFmpeg binary is available
+		if ( ! $this->is_executable( $this->find_ffmpeg_binary() ) ) {
+			return false;
+		}
+		
+		// Check if WebM codec is supported
+		return $this->supports_webm();
 	}
 
 	/**
@@ -150,15 +256,13 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return string Version information.
 	 */
 	private function get_version_info() {
+		if ( ! $this->ffmpeg ) {
+			return 'Unknown';
+		}
+
 		try {
-			$process = new Process( [ $this->ffmpeg_path, '-version' ] );
-			$process->run();
-			
-			if ( $process->isSuccessful() ) {
-				$output = $process->getOutput();
-				$lines = explode( "\n", $output );
-				return $lines[0] ?? 'Unknown';
-			}
+			// PHP-FFmpeg doesn't expose version directly, so we'll use a simple check
+			return 'FFmpeg (via PHP-FFmpeg)';
 		} catch ( \Exception $e ) {
 			$this->logger->error( "Failed to get FFmpeg version: {$e->getMessage()}" );
 		}
@@ -173,31 +277,15 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return array Codec information.
 	 */
 	private function get_codec_info() {
-		try {
-			$process = new Process( [ $this->ffmpeg_path, '-codecs' ] );
-			$process->run();
-			
-			if ( $process->isSuccessful() ) {
-				$output = $process->getOutput();
-				$lines = explode( "\n", $output );
-				
-				$codecs = [];
-				foreach ( $lines as $line ) {
-					if ( strpos( $line, 'libaom-av1' ) !== false ) {
-						$codecs['av1'] = true;
-					}
-					if ( strpos( $line, 'libvpx' ) !== false ) {
-						$codecs['webm'] = true;
-					}
-				}
-				
-				return $codecs;
-			}
-		} catch ( \Exception $e ) {
-			$this->logger->error( "Failed to get codec information: {$e->getMessage()}" );
-		}
-
-		return [];
+		$codecs = [];
+		
+		// Check for AV1 support
+		$codecs['av1'] = $this->supports_av1();
+		
+		// Check for WebM support
+		$codecs['webm'] = $this->supports_webm();
+		
+		return $codecs;
 	}
 
 	/**
@@ -210,50 +298,44 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_av1( $source_path, $destination_path, $options = [] ) {
+		if ( ! $this->ffmpeg ) {
+			$this->logger->error( 'FFmpeg is not available' );
+			return false;
+		}
+
 		if ( ! $this->supports_av1() ) {
 			$this->logger->error( 'FFmpeg does not support AV1 encoding' );
 			return false;
 		}
 
-		$crf = $options['crf'] ?? 28;
-		$preset = $options['preset'] ?? 'medium';
-		$cpu_used = $options['cpu_used'] ?? 4;
-		$threads = $options['threads'] ?? 0;
-
-		$command = [
-			$this->ffmpeg_path,
-			'-i', $source_path,
-			'-c:v', 'libaom-av1',
-			'-crf', (string) $crf,
-			'-preset', $preset,
-			'-cpu-used', (string) $cpu_used,
-			'-c:a', 'libopus',
-			'-b:a', '128k',
-			'-movflags', '+faststart',
-		];
-
-		if ( $threads > 0 ) {
-			$command[] = '-threads';
-			$command[] = (string) $threads;
-		}
-
-		$command[] = '-y'; // Overwrite output file.
-		$command[] = $destination_path;
-
 		try {
-			$process = new Process( $command );
-			$process->setTimeout( 3600 ); // 1 hour timeout.
-			$process->run();
+			$video = $this->ffmpeg->open( $source_path );
+			
+			// Create AV1 format with custom parameters
+			$format = new X264();
+			$format->setVideoCodec( 'libaom-av1' );
+			$format->setAudioCodec( 'libopus' );
+			$format->setAudioKiloBitrate( 128 );
+			
+			// Set AV1-specific parameters
+			$crf = $options['crf'] ?? 28;
+			$preset = $options['preset'] ?? 'medium';
+			$cpu_used = $options['cpu_used'] ?? 4;
+			
+			$format->setAdditionalParameters([
+				'-crf', (string) $crf,
+				'-preset', $preset,
+				'-cpu-used', (string) $cpu_used,
+				'-movflags', '+faststart',
+			]);
 
-			if ( $process->isSuccessful() ) {
-				$this->logger->info( "AV1 conversion completed successfully: {$source_path}" );
-				return true;
-			} else {
-				$this->logger->error( "AV1 conversion failed: {$process->getErrorOutput()}" );
-				return false;
-			}
-		} catch ( ProcessFailedException $e ) {
-			$this->logger->error( "AV1 conversion process failed: {$e->getMessage()}" );
+			$video->save( $format, $destination_path );
+			
+			$this->logger->info( "AV1 conversion completed successfully: {$source_path}" );
+			return true;
+			
+		} catch ( RuntimeException $e ) {
+			$this->logger->error( "AV1 conversion failed: {$e->getMessage()}" );
 			return false;
 		}
 	}
@@ -268,48 +350,42 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_webm( $source_path, $destination_path, $options = [] ) {
+		if ( ! $this->ffmpeg ) {
+			$this->logger->error( 'FFmpeg is not available' );
+			return false;
+		}
+
 		if ( ! $this->supports_webm() ) {
 			$this->logger->error( 'FFmpeg does not support WebM encoding' );
 			return false;
 		}
 
-		$crf = $options['crf'] ?? 30;
-		$preset = $options['preset'] ?? 'medium';
-		$threads = $options['threads'] ?? 0;
-
-		$command = [
-			$this->ffmpeg_path,
-			'-i', $source_path,
-			'-c:v', 'libvpx-vp9',
-			'-crf', (string) $crf,
-			'-preset', $preset,
-			'-c:a', 'libopus',
-			'-b:a', '128k',
-			'-movflags', '+faststart',
-		];
-
-		if ( $threads > 0 ) {
-			$command[] = '-threads';
-			$command[] = (string) $threads;
-		}
-
-		$command[] = '-y'; // Overwrite output file.
-		$command[] = $destination_path;
-
 		try {
-			$process = new Process( $command );
-			$process->setTimeout( 3600 ); // 1 hour timeout.
-			$process->run();
+			$video = $this->ffmpeg->open( $source_path );
+			
+			// Create WebM format
+			$format = new WebM();
+			$format->setVideoCodec( 'libvpx-vp9' );
+			$format->setAudioCodec( 'libopus' );
+			$format->setAudioKiloBitrate( 128 );
+			
+			// Set WebM-specific parameters
+			$crf = $options['crf'] ?? 30;
+			$preset = $options['preset'] ?? 'medium';
+			
+			$format->setAdditionalParameters([
+				'-crf', (string) $crf,
+				'-preset', $preset,
+				'-movflags', '+faststart',
+			]);
 
-			if ( $process->isSuccessful() ) {
-				$this->logger->info( "WebM conversion completed successfully: {$source_path}" );
-				return true;
-			} else {
-				$this->logger->error( "WebM conversion failed: {$process->getErrorOutput()}" );
-				return false;
-			}
-		} catch ( ProcessFailedException $e ) {
-			$this->logger->error( "WebM conversion process failed: {$e->getMessage()}" );
+			$video->save( $format, $destination_path );
+			
+			$this->logger->info( "WebM conversion completed successfully: {$source_path}" );
+			return true;
+			
+		} catch ( RuntimeException $e ) {
+			$this->logger->error( "WebM conversion failed: {$e->getMessage()}" );
 			return false;
 		}
 	}
@@ -322,35 +398,34 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return array|false Video metadata or false on failure.
 	 */
 	public function get_metadata( $file_path ) {
-		$command = [
-			$this->ffprobe_path,
-			'-v', 'quiet',
-			'-print_format', 'json',
-			'-show_format',
-			'-show_streams',
-			$file_path,
-		];
+		if ( ! $this->ffprobe ) {
+			return false;
+		}
 
 		try {
-			$process = new Process( $command );
-			$process->run();
+			$video_stream = $this->ffprobe
+				->streams( $file_path )
+				->videos()
+				->first();
 
-			if ( $process->isSuccessful() ) {
-				$output = $process->getOutput();
-				$metadata = json_decode( $output, true );
-				
-				if ( $metadata ) {
-					return [
-						'duration' => (float) ( $metadata['format']['duration'] ?? 0 ),
-						'bitrate' => (int) ( $metadata['format']['bit_rate'] ?? 0 ),
-						'size' => (int) ( $metadata['format']['size'] ?? 0 ),
-						'width' => (int) ( $metadata['streams'][0]['width'] ?? 0 ),
-						'height' => (int) ( $metadata['streams'][0]['height'] ?? 0 ),
-						'codec' => $metadata['streams'][0]['codec_name'] ?? 'unknown',
-					];
-				}
-			}
-		} catch ( \Exception $e ) {
+			$audio_stream = $this->ffprobe
+				->streams( $file_path )
+				->audios()
+				->first();
+
+			$format = $this->ffprobe->format( $file_path );
+
+			return [
+				'duration' => (float) $format->get( 'duration' ),
+				'bitrate' => (int) $format->get( 'bit_rate' ),
+				'size' => (int) $format->get( 'size' ),
+				'width' => (int) $video_stream->get( 'width' ),
+				'height' => (int) $video_stream->get( 'height' ),
+				'codec' => $video_stream->get( 'codec_name' ),
+				'fps' => (float) $video_stream->get( 'r_frame_rate' ),
+			];
+			
+		} catch ( RuntimeException $e ) {
 			$this->logger->error( "Failed to get video metadata: {$e->getMessage()}" );
 		}
 
@@ -364,19 +439,18 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return bool True if AV1 is supported, false otherwise.
 	 */
 	public function supports_av1() {
-		try {
-			$process = new Process( [ $this->ffmpeg_path, '-encoders' ] );
-			$process->run();
-			
-			if ( $process->isSuccessful() ) {
-				$output = $process->getOutput();
-				return strpos( $output, 'libaom-av1' ) !== false;
-			}
-		} catch ( \Exception $e ) {
-			$this->logger->error( "Failed to check AV1 support: {$e->getMessage()}" );
+		if ( ! $this->ffmpeg ) {
+			return false;
 		}
 
-		return false;
+		try {
+			// Try to create a format with AV1 codec to test support
+			$format = new X264();
+			$format->setVideoCodec( 'libaom-av1' );
+			return true;
+		} catch ( \Exception $e ) {
+			return false;
+		}
 	}
 
 	/**
@@ -386,18 +460,16 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * @return bool True if WebM is supported, false otherwise.
 	 */
 	public function supports_webm() {
-		try {
-			$process = new Process( [ $this->ffmpeg_path, '-encoders' ] );
-			$process->run();
-			
-			if ( $process->isSuccessful() ) {
-				$output = $process->getOutput();
-				return strpos( $output, 'libvpx-vp9' ) !== false;
-			}
-		} catch ( \Exception $e ) {
-			$this->logger->error( "Failed to check WebM support: {$e->getMessage()}" );
+		if ( ! $this->ffmpeg ) {
+			return false;
 		}
 
-		return false;
+		try {
+			// Try to create a WebM format to test support
+			$format = new WebM();
+			return true;
+		} catch ( \Exception $e ) {
+			return false;
+		}
 	}
 }

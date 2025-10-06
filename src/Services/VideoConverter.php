@@ -9,6 +9,7 @@
 namespace FluxMedia\Services;
 
 use FluxMedia\Utils\Logger;
+use FluxMedia\Utils\StructuredLogger;
 use FluxMedia\Interfaces\VideoProcessorInterface;
 use FluxMedia\Processors\FFmpegProcessor;
 use Symfony\Component\Process\Process;
@@ -28,6 +29,14 @@ class VideoConverter {
 	 * @var Logger
 	 */
 	private $logger;
+
+	/**
+	 * Structured logger instance.
+	 *
+	 * @since 1.0.0
+	 * @var StructuredLogger
+	 */
+	private $structured_logger;
 
 	/**
 	 * Video processor instance.
@@ -61,6 +70,7 @@ class VideoConverter {
 	 */
 	public function __construct( Logger $logger ) {
 		$this->logger = $logger;
+		$this->structured_logger = new StructuredLogger( $logger );
 		$this->processor = $this->get_available_processor();
 	}
 
@@ -71,13 +81,9 @@ class VideoConverter {
 	 * @return VideoProcessorInterface|null The processor instance or null if none available.
 	 */
 	private function get_available_processor() {
-		// Check if FFmpeg is available.
-		if ( $this->is_ffmpeg_available() ) {
-			return new FFmpegProcessor( $this->logger );
-		}
-
-		$this->logger->warning( 'No suitable video processor found. FFmpeg is required for video conversion.' );
-		return null;
+		// Always create FFmpegProcessor instance to get detailed status information
+		// The processor itself will handle availability detection and reporting
+		return new FFmpegProcessor( $this->logger );
 	}
 
 	/**
@@ -123,6 +129,7 @@ class VideoConverter {
 			];
 		}
 
+		// Always get detailed info from the processor, even if not fully available
 		return $this->processor->get_info();
 	}
 

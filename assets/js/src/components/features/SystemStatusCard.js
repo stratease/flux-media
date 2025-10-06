@@ -36,10 +36,14 @@ const SystemStatusCard = ({ status, loading, error }) => {
               <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
               <Skeleton variant="rectangular" width={120} height={32} sx={{ borderRadius: 1, mb: 2 }} />
               <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
-                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
-              </Box>
+              <Grid container spacing={1}>
+                <Grid item>
+                  <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                </Grid>
+                <Grid item>
+                  <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                </Grid>
+              </Grid>
             </Box>
           </Grid>
 
@@ -49,10 +53,14 @@ const SystemStatusCard = ({ status, loading, error }) => {
               <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
               <Skeleton variant="rectangular" width={120} height={32} sx={{ borderRadius: 1, mb: 2 }} />
               <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
-                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
-              </Box>
+              <Grid container spacing={1}>
+                <Grid item>
+                  <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                </Grid>
+                <Grid item>
+                  <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                </Grid>
+              </Grid>
             </Box>
           </Grid>
 
@@ -151,30 +159,29 @@ const SystemStatusCard = ({ status, loading, error }) => {
               <Box sx={{ mb: 2 }}>
                 {getStatusChip(imageProcessor.available, (imageProcessor.type || 'Unknown').toUpperCase())}
               </Box>
-              
-              {imageProcessor.available && (
-                <Box sx={{ ml: 2 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    {__('Version:', 'flux-media')} {imageProcessor.version || __('Unknown', 'flux-media')}
-                  </Typography>
-                  <Grid container spacing={1} sx={{ mt: 1 }}>
-                    <Grid item>
-                      <Chip
-                        label="WebP"
-                        color={imageProcessor.webp_support ? 'success' : 'default'}
-                        size="small"
-                      />
-                    </Grid>
-                    <Grid item>
-                      <Chip
-                        label="AVIF"
-                        color={imageProcessor.avif_support ? 'success' : 'default'}
-                        size="small"
-                      />
-                    </Grid>
+          
+              <Box sx={{ ml: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  {__('Version:', 'flux-media')} {imageProcessor?.version || __('Unknown', 'flux-media')}
+                </Typography>
+                <Grid container spacing={1} sx={{ mt: 1 }}>
+                  <Grid item>
+                    <Chip
+                      label="WebP"
+                      color={imageProcessor?.webp_support ? 'success' : 'error'}
+                      size="small"
+                    />
                   </Grid>
-                </Box>
-              )}
+                  <Grid item>
+                    <Chip
+                      label="AVIF"
+                      color={imageProcessor?.avif_support ? 'success' : 'error'}
+                      size="small"
+                    />
+                  </Grid>
+                </Grid>
+              </Box>
+            
             </Box>
           </Grid>
 
@@ -188,29 +195,27 @@ const SystemStatusCard = ({ status, loading, error }) => {
                 {getStatusChip(videoProcessor.available, (videoProcessor.type || 'Unknown').toUpperCase())}
               </Box>
               
-              {videoProcessor.available && (
-                <Box sx={{ ml: 2 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    {__('Version:', 'flux-media')} {videoProcessor.version || __('Unknown', 'flux-media')}
-                  </Typography>
-                  <Grid container spacing={1} sx={{ mt: 1 }}>
-                    <Grid item>
-                      <Chip
-                        label="AV1"
-                        color={videoProcessor.av1_support ? 'success' : 'default'}
-                        size="small"
-                      />
-                    </Grid>
-                    <Grid item>
-                      <Chip
-                        label="WebM"
-                        color={videoProcessor.webm_support ? 'success' : 'default'}
-                        size="small"
-                      />
-                    </Grid>
+              <Box sx={{ ml: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  {__('Version:', 'flux-media')} {videoProcessor?.version || __('Unknown', 'flux-media')}
+                </Typography> 
+                <Grid container spacing={1} sx={{ mt: 1 }}>
+                  <Grid item>
+                    <Chip
+                      label="AV1"
+                      color={videoProcessor?.av1_support ? 'success' : 'error'}
+                      size="small"
+                    />
                   </Grid>
-                </Box>
-              )}
+                  <Grid item>
+                    <Chip
+                      label="WebM"
+                      color={videoProcessor?.webm_support ? 'success' : 'error'}
+                      size="small"
+                    />
+                  </Grid>
+                </Grid>
+              </Box>
             </Box>
           </Grid>
 

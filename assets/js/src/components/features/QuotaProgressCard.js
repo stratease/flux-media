@@ -12,7 +12,6 @@ import {
   Skeleton,
 } from '@mui/material';
 import {
-  TrendingUp,
   VideoLibrary,
   Image,
   Upgrade,
@@ -63,10 +62,14 @@ const QuotaProgressCard = ({ quota, loading, error, onUpgrade }) => {
 
           {/* Quota Status Skeleton */}
           <Grid item xs={12}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-              <Skeleton variant="text" width="30%" height={20} />
-              <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
-            </Box>
+            <Grid container alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+              <Grid item>
+                <Skeleton variant="text" width="30%" height={20} />
+              </Grid>
+              <Grid item>
+                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
       </Box>
@@ -176,12 +179,16 @@ const QuotaProgressCard = ({ quota, loading, error, onUpgrade }) => {
           {/* Video Quota */}
           <Grid item xs={12} md={6}>
             <Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <VideoLibrary color="secondary" sx={{ mr: 1 }} />
-                <Typography variant="h6">
-                  Video Conversions
-                </Typography>
-              </Box>
+              <Grid container alignItems="center" sx={{ mb: 1 }}>
+                <Grid item>
+                  <VideoLibrary color="secondary" sx={{ mr: 1 }} />
+                </Grid>
+                <Grid item>
+                  <Typography variant="h6">
+                    {__('Video Conversions', 'flux-media')}
+                  </Typography>
+                </Grid>
+              </Grid>
               
               <Box sx={{ mb: 2 }}>
                 <Typography variant="h4" component="div" color={isVideoQuotaExceeded ? 'error' : 'text.primary'}>
@@ -207,16 +214,20 @@ const QuotaProgressCard = ({ quota, loading, error, onUpgrade }) => {
 
           {/* Quota Status */}
           <Grid item xs={12}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                {__('Next reset:', 'flux-media')} {quota.next_reset ? formatDate(quota.next_reset) : __('Unknown', 'flux-media')}
-              </Typography>
-              <Chip
-                label={plan.toUpperCase()}
-                color={plan === 'free' ? 'default' : 'primary'}
-                size="small"
-              />
-            </Box>
+            <Grid container alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+              <Grid item>
+                <Typography variant="body2" color="text.secondary">
+                  {__('Next reset:', 'flux-media')} {quota.next_reset ? formatDate(quota.next_reset) : __('Unknown', 'flux-media')}
+                </Typography>
+              </Grid>
+              <Grid item>
+                <Chip
+                  label={plan.toUpperCase()}
+                  color={plan === 'free' ? 'default' : 'primary'}
+                  size="small"
+                />
+              </Grid>
+            </Grid>
 
             {/* Quota Exceeded Warning */}
             {isAnyQuotaExceeded && (

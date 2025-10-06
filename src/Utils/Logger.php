@@ -9,9 +9,7 @@
 namespace FluxMedia\Utils;
 
 use Monolog\Logger as MonologLogger;
-use Monolog\Handler\StreamHandler;
-use Monolog\Handler\RotatingFileHandler;
-use Monolog\Formatter\LineFormatter;
+use FluxMedia\Utils\DatabaseHandler;
 
 /**
  * Logger utility class using Monolog.
@@ -44,22 +42,18 @@ class Logger {
 	 * @since 1.0.0
 	 */
 	private function setup_handlers() {
-		$log_dir = WP_CONTENT_DIR . '/uploads/flux-media-logs';
+		// Check if logging is disabled
+		$options = get_option( 'flux_media_options', [] );
+		$logging_enabled = $options['enable_logging'] ?? true;
 		
-		// Create log directory if it doesn't exist.
-		if ( ! file_exists( $log_dir ) ) {
-			wp_mkdir_p( $log_dir );
+		if ( ! $logging_enabled ) {
+			// If logging is disabled, don't add any handlers
+			return;
 		}
 
-		// Rotating file handler for general logs.
-		$file_handler = new RotatingFileHandler( $log_dir . '/flux-media.log', 7, MonologLogger::INFO );
-		$file_handler->setFormatter( new LineFormatter( "[%datetime%] %channel%.%level_name%: %message% %context%\n" ) );
-		$this->logger->pushHandler( $file_handler );
-
-		// Error handler for errors only.
-		$error_handler = new RotatingFileHandler( $log_dir . '/flux-media-error.log', 7, MonologLogger::ERROR );
-		$error_handler->setFormatter( new LineFormatter( "[%datetime%] %channel%.%level_name%: %message% %context%\n" ) );
-		$this->logger->pushHandler( $error_handler );
+		// Database handler for all log levels (DEBUG and above)
+		$database_handler = new DatabaseHandler( MonologLogger::DEBUG );
+		$this->logger->pushHandler( $database_handler );
 	}
 
 	/**

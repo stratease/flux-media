@@ -16,6 +16,7 @@ const SettingsPage = () => {
     hybrid_approach: true,
     video_formats: ['av1', 'webm'],
     license_key: '',
+    enable_logging: true,
   });
 
   const [error, setError] = useState(null);
@@ -235,6 +236,33 @@ const SettingsPage = () => {
               sx={{ maxWidth: 400 }}
               helperText={__('Your license key will be securely stored and used to validate premium features.', 'flux-media')}
             />
+          </Box>
+        </Grid>
+
+        {/* System Settings */}
+        <Grid item xs={12}>
+          <Divider sx={{ my: 2 }} />
+          <Box>
+            <Typography variant="h5" gutterBottom>
+              {__('System Settings', 'flux-media')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {__('Configure system-level settings for Flux Media.', 'flux-media')}
+            </Typography>
+            <Stack spacing={2}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings.enable_logging}
+                    onChange={handleSettingChange('enable_logging')}
+                  />
+                }
+                label={__('Enable logging', 'flux-media')}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {__('When enabled, Flux Media will log errors, warnings, and system information to help with troubleshooting. Disable this in production environments if you prefer not to store logs.', 'flux-media')}
+              </Typography>
+            </Stack>
           </Box>
         </Grid>
 

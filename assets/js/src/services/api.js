@@ -152,12 +152,15 @@ class ApiService {
   }
 
   // Logs
-  async getLogs(level, limit = 100) {
-    const params = new URLSearchParams();
-    if (level) params.append('level', level);
-    params.append('limit', limit.toString());
+  async getLogs(params = {}) {
+    const queryParams = new URLSearchParams();
     
-    return this.request(`/logs?${params.toString()}`);
+    if (params.page) queryParams.append('page', params.page.toString());
+    if (params.per_page) queryParams.append('per_page', params.per_page.toString());
+    if (params.level) queryParams.append('level', params.level);
+    if (params.search) queryParams.append('search', params.search);
+    
+    return this.request(`/logs?${queryParams.toString()}`);
   }
 
   // Cleanup operations

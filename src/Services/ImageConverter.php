@@ -9,6 +9,7 @@
 namespace FluxMedia\Services;
 
 use FluxMedia\Utils\Logger;
+use FluxMedia\Utils\StructuredLogger;
 use FluxMedia\Interfaces\ImageProcessorInterface;
 use FluxMedia\Processors\GDProcessor;
 use FluxMedia\Processors\ImagickProcessor;
@@ -27,6 +28,14 @@ class ImageConverter {
 	 * @var Logger
 	 */
 	private $logger;
+
+	/**
+	 * Structured logger instance.
+	 *
+	 * @since 1.0.0
+	 * @var StructuredLogger
+	 */
+	private $structured_logger;
 
 	/**
 	 * Image processor instance.
@@ -57,6 +66,7 @@ class ImageConverter {
 	 */
 	public function __construct( Logger $logger ) {
 		$this->logger = $logger;
+		$this->structured_logger = new StructuredLogger( $logger );
 		$this->processor = $this->get_available_processor();
 	}
 
@@ -74,7 +84,23 @@ class ImageConverter {
 			
 			// Check if Imagick supports WebP and AVIF.
 			if ( in_array( 'WEBP', $formats, true ) && in_array( 'AVIF', $formats, true ) ) {
+				$this->structured_logger->log_operation_success( 'Image processor initialization', 'Imagick with WebP and AVIF support detected' );
 				return new ImagickProcessor( $this->logger );
+			} else {
+				$missing_formats = [];
+				if ( ! in_array( 'WEBP', $formats, true ) ) {
+					$missing_formats[] = 'WebP';
+				}
+				if ( ! in_array( 'AVIF', $formats, true ) ) {
+					$missing_formats[] = 'AVIF';
+				}
+				$this->structured_logger->log_image_format_unsupported( 'Imagick', implode( ', ', $missing_formats ), 'Format not compiled in Imagick' );
+			}
+		} else {
+			if ( ! class_exists( 'Imagick' ) ) {
+				$this->structured_logger->log_image_processor_unavailable( 'Imagick', 'Imagick class not found' );
+			} elseif ( ! extension_loaded( 'imagick' ) ) {
+				$this->structured_logger->log_image_processor_unavailable( 'Imagick', 'Imagick extension not loaded' );
 			}
 		}
 
@@ -83,11 +109,16 @@ class ImageConverter {
 			// Check GD version and WebP support.
 			$gd_info = gd_info();
 			if ( isset( $gd_info['WebP Support'] ) && $gd_info['WebP Support'] ) {
+				$this->structured_logger->log_operation_success( 'Image processor initialization', 'GD with WebP support detected' );
 				return new GDProcessor( $this->logger );
+			} else {
+				$this->structured_logger->log_image_format_unsupported( 'GD', 'WebP', 'WebP support not compiled in GD' );
 			}
+		} else {
+			$this->structured_logger->log_image_processor_unavailable( 'GD', 'GD extension not loaded' );
 		}
 
-		$this->logger->warning( 'No suitable image processor found. Imagick or GD with WebP support required.' );
+		$this->structured_logger->log_image_processor_unavailable( 'All', 'No suitable image processor found. Imagick or GD with WebP support required.' );
 		return null;
 	}
 
@@ -108,16 +139,65 @@ class ImageConverter {
 	 * @return array Processor information.
 	 */
 	public function get_processor_info() {
-		if ( ! $this->processor ) {
+		// Always check format support capabilities, regardless of processor availability
+		$webp_support = $this->can_convert_to_webp();
+		$avif_support = $this->can_convert_to_avif();
+		
+		// Processor is available if we can convert to at least one format
+		$available = $webp_support || $avif_support;
+		
+		if ( $available && $this->processor ) {
+			$processor_info = $this->processor->get_info();
+			
 			return [
-				'available' => false,
-				'type' => 'none',
-				'webp_support' => false,
-				'avif_support' => false,
+				'available' => true,
+				'type' => $processor_info['type'] ?? 'unknown',
+				'version' => $processor_info['version'] ?? 'Unknown',
+				'webp_support' => $webp_support,
+				'avif_support' => $avif_support,
 			];
 		}
+		
+		return [
+			'available' => false,
+			'type' => 'none',
+			'webp_support' => false,
+			'avif_support' => false,
+		];
+	}
 
-		return $this->processor->get_info();
+	/**
+	 * Check if we can convert to WebP format.
+	 *
+	 * @since 1.0.0
+	 * @return bool True if WebP conversion is possible, false otherwise.
+	 */
+	private function can_convert_to_webp() {
+		// Check if processor is available
+		if ( ! $this->processor ) {
+			return false;
+		}
+		
+		// Check processor-specific WebP support
+		$processor_info = $this->processor->get_info();
+		return $processor_info['webp_support'] ?? false;
+	}
+
+	/**
+	 * Check if we can convert to AVIF format.
+	 *
+	 * @since 1.0.0
+	 * @return bool True if AVIF conversion is possible, false otherwise.
+	 */
+	private function can_convert_to_avif() {
+		// Check if processor is available
+		if ( ! $this->processor ) {
+			return false;
+		}
+		
+		// Check processor-specific AVIF support
+		$processor_info = $this->processor->get_info();
+		return $processor_info['avif_support'] ?? false;
 	}
 
 	/**
@@ -131,7 +211,7 @@ class ImageConverter {
 	 */
 	public function convert_to_webp( $source_path, $destination_path, $options = [] ) {
 		if ( ! $this->processor ) {
-			$this->logger->error( 'No image processor available for WebP conversion' );
+			$this->structured_logger->log_image_conversion_failed( $source_path, 'WebP', 'No image processor available' );
 			return false;
 		}
 
@@ -146,14 +226,14 @@ class ImageConverter {
 			$result = $this->processor->convert_to_webp( $source_path, $destination_path, $options );
 			
 			if ( $result ) {
-				$this->logger->info( "Successfully converted image to WebP: {$source_path}" );
+				$this->structured_logger->log_operation_success( 'WebP conversion', "Successfully converted {$source_path}" );
 			} else {
-				$this->logger->error( "Failed to convert image to WebP: {$source_path}" );
+				$this->structured_logger->log_image_conversion_failed( $source_path, 'WebP', 'Processor returned false' );
 			}
 
 			return $result;
 		} catch ( \Exception $e ) {
-			$this->logger->error( "Exception during WebP conversion: {$e->getMessage()}" );
+			$this->structured_logger->log_image_conversion_failed( $source_path, 'WebP', $e->getMessage() );
 			return false;
 		}
 	}
@@ -169,7 +249,7 @@ class ImageConverter {
 	 */
 	public function convert_to_avif( $source_path, $destination_path, $options = [] ) {
 		if ( ! $this->processor ) {
-			$this->logger->error( 'No image processor available for AVIF conversion' );
+			$this->structured_logger->log_image_conversion_failed( $source_path, 'AVIF', 'No image processor available' );
 			return false;
 		}
 
@@ -184,14 +264,14 @@ class ImageConverter {
 			$result = $this->processor->convert_to_avif( $source_path, $destination_path, $options );
 			
 			if ( $result ) {
-				$this->logger->info( "Successfully converted image to AVIF: {$source_path}" );
+				$this->structured_logger->log_operation_success( 'AVIF conversion', "Successfully converted {$source_path}" );
 			} else {
-				$this->logger->error( "Failed to convert image to AVIF: {$source_path}" );
+				$this->structured_logger->log_image_conversion_failed( $source_path, 'AVIF', 'Processor returned false' );
 			}
 
 			return $result;
 		} catch ( \Exception $e ) {
-			$this->logger->error( "Exception during AVIF conversion: {$e->getMessage()}" );
+			$this->structured_logger->log_image_conversion_failed( $source_path, 'AVIF', $e->getMessage() );
 			return false;
 		}
 	}
@@ -262,6 +342,104 @@ class ImageConverter {
 			$this->logger->warning( "Partial hybrid conversion success: {$source_path} (WebP: " . ( $results['webp'] ? 'success' : 'failed' ) . ", AVIF: " . ( $results['avif'] ? 'success' : 'failed' ) . ")" );
 		} else {
 			$this->logger->error( "Hybrid conversion failed for both formats: {$source_path}" );
+		}
+
+		return $results;
+	}
+
+	/**
+	 * Process image on upload - convert to WebP/AVIF while retaining original.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id WordPress attachment ID.
+	 * @return array Conversion results.
+	 */
+	public function process_uploaded_image( $attachment_id ) {
+		$results = [
+			'success' => false,
+			'converted_formats' => [],
+			'errors' => [],
+		];
+
+		// Get attachment file path
+		$file_path = get_attached_file( $attachment_id );
+		if ( ! $file_path || ! file_exists( $file_path ) ) {
+			$results['errors'][] = 'Attachment file not found';
+			return $results;
+		}
+
+		// Check if image is supported
+		if ( ! $this->is_supported_image( $file_path ) ) {
+			$results['errors'][] = 'Unsupported image format';
+			return $results;
+		}
+
+		// Get upload directory info
+		$upload_dir = wp_upload_dir();
+		$file_info = pathinfo( $file_path );
+		$file_dir = $file_info['dirname'];
+		$file_name = $file_info['filename'];
+
+		// Get plugin options
+		$options = get_option( 'flux_media_options', [] );
+		$hybrid_approach = $options['hybrid_approach'] ?? true;
+		$image_formats = $options['image_formats'] ?? ['webp', 'avif'];
+		$webp_quality = $options['image_webp_quality'] ?? 85;
+
+		// Check if auto-conversion is enabled
+		if ( ! ( $options['image_auto_convert'] ?? true ) ) {
+			$results['errors'][] = 'Auto-conversion is disabled';
+			return $results;
+		}
+
+		// Process based on settings
+		if ( $hybrid_approach && in_array( 'webp', $image_formats, true ) && in_array( 'avif', $image_formats, true ) ) {
+			// Hybrid approach - create both WebP and AVIF
+			$webp_path = $file_dir . '/' . $file_name . '.webp';
+			$avif_path = $file_dir . '/' . $file_name . '.avif';
+
+			$conversion_results = $this->convert_hybrid(
+				$file_path,
+				$webp_path,
+				$avif_path,
+				['quality' => $webp_quality],
+				['quality' => max( 60, $webp_quality - 10 )] // AVIF typically needs lower quality for similar file size
+			);
+
+			if ( $conversion_results['webp'] ) {
+				$results['converted_formats'][] = 'webp';
+			}
+			if ( $conversion_results['avif'] ) {
+				$results['converted_formats'][] = 'avif';
+			}
+
+		} else {
+			// Individual format conversion
+			foreach ( $image_formats as $format ) {
+				$destination_path = $file_dir . '/' . $file_name . '.' . $format;
+				$conversion_options = ['quality' => $webp_quality];
+
+				$success = false;
+				if ( 'webp' === $format ) {
+					$success = $this->convert_to_webp( $file_path, $destination_path, $conversion_options );
+				} elseif ( 'avif' === $format ) {
+					$conversion_options['quality'] = max( 60, $webp_quality - 10 );
+					$success = $this->convert_to_avif( $file_path, $destination_path, $conversion_options );
+				}
+
+				if ( $success ) {
+					$results['converted_formats'][] = $format;
+				}
+			}
+		}
+
+		// Update results
+		$results['success'] = ! empty( $results['converted_formats'] );
+
+		// Store conversion metadata
+		if ( $results['success'] ) {
+			update_post_meta( $attachment_id, '_flux_media_converted_formats', $results['converted_formats'] );
+			update_post_meta( $attachment_id, '_flux_media_conversion_date', current_time( 'mysql' ) );
 		}
 
 		return $results;

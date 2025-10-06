@@ -15,11 +15,12 @@ Advanced image and video optimization plugin for WordPress. Converts images to W
 - **Smart Fallbacks**: Graceful degradation when formats aren't supported
 
 ### Video Optimization
-- **AV1 Encoding**: Convert MP4 videos to AV1 format
-- **WebM Encoding**: Convert videos to WebM format
-- **High Quality**: Industry-standard encoding settings
-- **FFmpeg Integration**: Uses FFmpeg for video processing
+- **AV1 Encoding**: Convert MP4 videos to AV1 format using libaom-av1
+- **WebM Encoding**: Convert videos to WebM format using libvpx-vp9
+- **High Quality**: Industry-standard encoding settings with CRF control
+- **PHP-FFmpeg Integration**: Uses PHP-FFmpeg library for robust video processing
 - **Batch Processing**: Queue and process multiple videos
+- **Format Support**: Convert from various formats (MP4, AVI, MOV, etc.) to AV1/WebM
 
 ### Freemium Model
 - **Free Tier**: 100 image conversions + 20 video conversions per month
@@ -61,6 +62,7 @@ Advanced image and video optimization plugin for WordPress. Converts images to W
 - **Database Abstraction**: WordPress database layer with custom tables
 - **Debug Mode**: Enhanced error reporting with exception output in development
 - **Data Sanitization**: Comprehensive input validation and sanitization
+- **PHP-FFmpeg**: Professional video processing library for AV1/WebM conversion
 
 ### Component Architecture
 - **Smart/Dumb Components**: Clear separation of data and presentation
@@ -84,6 +86,7 @@ Advanced image and video optimization plugin for WordPress. Converts images to W
   - `libopus` for audio encoding
 - **Memory**: Minimum 256MB PHP memory limit
 - **Storage**: Sufficient disk space for converted media
+- **Composer**: For PHP dependency management
 
 ### Development Requirements
 - **Node.js 16+** (for building React frontend)
@@ -210,26 +213,54 @@ The admin interface uses WordPress admin URLs with hash-based routing for seamle
 
 The interface uses React Router with hash-based navigation for a single-page application experience, with all pages rendered within the same React application container.
 
-### API Endpoints
+### API Architecture
+The REST API follows WordPress REST API best practices with separate controller classes for each resource:
+
+#### Controller Structure
+```
+src/Api/Controllers/
+├── BaseController.php          # Base class with common functionality
+├── SystemController.php        # System status and test endpoints
+├── LogsController.php          # Logs retrieval with pagination
+├── OptionsController.php       # Plugin options management
+├── ConversionsController.php   # Conversion operations and statistics
+├── QuotaController.php         # Quota and plan management
+├── FilesController.php         # File operations
+└── CleanupController.php       # Cleanup operations
+```
+
+#### API Endpoints
 All endpoints are prefixed with `/wp-json/flux-media/v1/` and require admin authentication:
 
-#### System Endpoints
+##### System Endpoints (`SystemController`)
+- `GET /test` - Test endpoint to verify API functionality
 - `GET /system/status` - Get system status and capabilities
 
-#### Conversion Endpoints
+##### Logs Endpoints (`LogsController`)
+- `GET /logs` - Get logs with pagination, filtering, and search
+  - Query parameters: `page`, `per_page`, `level`, `search`
+
+##### Options Endpoints (`OptionsController`)
+- `GET /options` - Get plugin options
+- `POST /options` - Update plugin options
+
+##### Conversion Endpoints (`ConversionsController`)
 - `GET /conversions/stats` - Get conversion statistics
 - `GET /conversions/recent` - Get recent conversions
 - `POST /conversions/start` - Start a conversion job
 - `POST /conversions/cancel/{jobId}` - Cancel a conversion job
 - `POST /conversions/bulk` - Start bulk conversion
 
-#### Quota Endpoints
+##### Quota Endpoints (`QuotaController`)
 - `GET /quota/progress` - Get quota usage information
 - `GET /quota/plan` - Get current plan information
 
-#### Options Endpoints
-- `GET /options` - Get plugin options
-- `POST /options` - Update plugin options
+##### File Endpoints (`FilesController`)
+- `DELETE /files/delete/{attachmentId}/{format}` - Delete converted file
+
+##### Cleanup Endpoints (`CleanupController`)
+- `POST /cleanup/temp-files` - Cleanup temporary files
+- `POST /cleanup/old-records` - Cleanup old conversion records
 
 ### Response Format
 All API responses use WordPress apiFetch format. React Query handles error states and caching automatically.

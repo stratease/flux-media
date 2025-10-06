@@ -8,6 +8,7 @@ import { __ } from '@wordpress/i18n';
 import { ErrorBoundary, FluxMediaIcon } from '@flux-media/components';
 import OverviewPage from '@flux-media/pages/OverviewPage';
 import SettingsPage from '@flux-media/pages/SettingsPage';
+import LogsPage from '@flux-media/components/pages/LogsPage';
 import theme from '@flux-media/theme';
 import { AutoSaveProvider } from '@flux-media/contexts/AutoSaveContext';
 
@@ -35,13 +36,15 @@ const Navigation = () => {
         return 0;
       case '/settings':
         return 1;
+      case '/logs':
+        return 2;
       default:
         return 0;
     }
   };
 
   const handleTabChange = (event, newValue) => {
-    const paths = ['/overview', '/settings'];
+    const paths = ['/overview', '/settings', '/logs'];
     navigate(paths[newValue]);
   };
 
@@ -66,6 +69,7 @@ const Navigation = () => {
       >
         <Tab label={__('Overview', 'flux-media')} />
         <Tab label={__('Settings', 'flux-media')} />
+        <Tab label={__('Logs', 'flux-media')} />
       </Tabs>
     </Box>
   );
@@ -102,6 +106,7 @@ const App = () => {
                   <Routes>
                     <Route path="/overview" element={<OverviewPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/logs" element={<LogsPage />} />
                     <Route path="/" element={<Navigate to="/overview" replace />} />
                   </Routes>
                 </Paper>
