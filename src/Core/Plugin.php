@@ -10,9 +10,11 @@ namespace FluxMedia\Core;
 
 use FluxMedia\Admin\Admin;
 use FluxMedia\Api\RestApiManager;
+use FluxMedia\Public\ImageRenderer;
 use FluxMedia\Services\ImageConverter;
 use FluxMedia\Services\VideoConverter;
 use FluxMedia\Services\ConversionTracker;
+use FluxMedia\Services\QuotaManager;
 use FluxMedia\Utils\Logger;
 use Psr\Container\ContainerInterface;
 
@@ -54,6 +56,9 @@ class Plugin {
 			$this->init_admin();
 		}
 
+		// Initialize image renderer.
+		$this->init_image_renderer();
+
 		// Initialize REST API.
 		$this->init_rest_api();
 
@@ -72,9 +77,25 @@ class Plugin {
 
 		// Register services in container.
 		$this->container->set( 'logger', new Logger() );
-		$this->container->set( 'image_converter', new ImageConverter( $this->container->get( 'logger' ) ) );
-		$this->container->set( 'video_converter', new VideoConverter( $this->container->get( 'logger' ) ) );
+		$this->container->set( 'quota_manager', new QuotaManager() );
 		$this->container->set( 'conversion_tracker', new ConversionTracker() );
+		
+		// Create converter instances with dependencies
+		$logger = $this->container->get( 'logger' );
+		$quota_manager = $this->container->get( 'quota_manager' );
+		$image_converter = new ImageConverter( $logger, $quota_manager );
+		$video_converter = new VideoConverter( $logger, $quota_manager );
+		
+		// Register converters
+		$this->container->set( 'image_converter', $image_converter );
+		$this->container->set( 'video_converter', $video_converter );
+		
+		// Create and register image renderer with converter instances
+		$this->container->set( 'image_renderer', new ImageRenderer( $image_converter, $video_converter ) );
+		
+		// Initialize quota tracking
+		$quota_manager = $this->container->get( 'quota_manager' );
+		$quota_manager->initialize_quota_tracking();
 	}
 
 	/**
@@ -85,6 +106,16 @@ class Plugin {
 	private function init_admin() {
 		$admin = new Admin( $this->container );
 		$admin->init();
+	}
+
+	/**
+	 * Initialize image renderer.
+	 *
+	 * @since 1.0.0
+	 */
+	private function init_image_renderer() {
+		$image_renderer = $this->container->get( 'image_renderer' );
+		$image_renderer->init();
 	}
 
 	/**
@@ -137,12 +168,9 @@ class Plugin {
 			$this->process_image_upload( $attachment_id );
 		}
 
-		// Handle video conversion (for future implementation)
+		// Handle video conversion
 		if ( strpos( $mime_type, 'video/' ) === 0 ) {
-			// TODO: Implement video conversion on upload
-			// For now, just log that video was uploaded
-			$logger = $this->container->get( 'logger' );
-			$logger->info( "Video uploaded: {$attachment_id} (conversion not yet implemented)" );
+			$this->process_video_upload( $attachment_id );
 		}
 	}
 
@@ -155,6 +183,7 @@ class Plugin {
 	private function process_image_upload( $attachment_id ) {
 		try {
 			$image_converter = $this->container->get( 'image_converter' );
+			$quota_manager = $this->container->get( 'quota_manager' );
 			
 			// Check if image conversion is available
 			if ( ! $image_converter->is_available() ) {
@@ -163,7 +192,14 @@ class Plugin {
 				return;
 			}
 
-			// Process the uploaded image
+			// Check quota before processing
+			if ( ! $quota_manager->can_convert( 'image' ) ) {
+				$logger = $this->container->get( 'logger' );
+				$logger->warning( "Image conversion quota exceeded for attachment: {$attachment_id}" );
+				return;
+			}
+
+			// Process the uploaded image (quota tracking is handled inside the converter)
 			$results = $image_converter->process_uploaded_image( $attachment_id );
 
 			if ( $results['success'] ) {
@@ -179,6 +215,50 @@ class Plugin {
 		} catch ( \Exception $e ) {
 			$logger = $this->container->get( 'logger' );
 			$logger->error( "Exception during image conversion for attachment {$attachment_id}: {$e->getMessage()}" );
+		}
+	}
+
+	/**
+	 * Process video upload - convert to AV1/WebM.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id The attachment ID.
+	 */
+	private function process_video_upload( $attachment_id ) {
+		try {
+			$video_converter = $this->container->get( 'video_converter' );
+			$quota_manager = $this->container->get( 'quota_manager' );
+			
+			// Check if video conversion is available
+			if ( ! $video_converter->is_available() ) {
+				$logger = $this->container->get( 'logger' );
+				$logger->warning( "Video conversion not available for attachment: {$attachment_id}" );
+				return;
+			}
+
+			// Check quota before processing
+			if ( ! $quota_manager->can_convert( 'video' ) ) {
+				$logger = $this->container->get( 'logger' );
+				$logger->warning( "Video conversion quota exceeded for attachment: {$attachment_id}" );
+				return;
+			}
+
+			// Process the uploaded video (quota tracking is handled inside the converter)
+			$results = $video_converter->process_uploaded_video( $attachment_id );
+
+			if ( $results['success'] ) {
+				$logger = $this->container->get( 'logger' );
+				$formats = implode( ', ', $results['converted_formats'] );
+				$logger->info( "Successfully converted video {$attachment_id} to: {$formats}" );
+			} else {
+				$logger = $this->container->get( 'logger' );
+				$errors = implode( ', ', $results['errors'] );
+				$logger->warning( "Failed to convert video {$attachment_id}: {$errors}" );
+			}
+
+		} catch ( \Exception $e ) {
+			$logger = $this->container->get( 'logger' );
+			$logger->error( "Exception during video conversion for attachment {$attachment_id}: {$e->getMessage()}" );
 		}
 	}
 

@@ -10,65 +10,110 @@ namespace FluxMedia\Services;
 
 use FluxMedia\Utils\Logger;
 use FluxMedia\Utils\StructuredLogger;
+use FluxMedia\Interfaces\Converter;
 use FluxMedia\Interfaces\ImageProcessorInterface;
 use FluxMedia\Processors\GDProcessor;
 use FluxMedia\Processors\ImagickProcessor;
+use FluxMedia\Services\QuotaManager;
+use Imagick;
 
 /**
  * Image conversion service that handles WebP and AVIF conversion.
  *
  * @since 1.0.0
  */
-class ImageConverter {
+class ImageConverter implements Converter {
 
-	/**
-	 * Logger instance.
-	 *
-	 * @since 1.0.0
-	 * @var Logger
-	 */
-	private $logger;
+    /**
+     * Logger instance.
+     *
+     * @since 1.0.0
+     * @var Logger
+     */
+    private $logger;
 
-	/**
-	 * Structured logger instance.
-	 *
-	 * @since 1.0.0
-	 * @var StructuredLogger
-	 */
-	private $structured_logger;
+    /**
+     * Structured logger instance.
+     *
+     * @since 1.0.0
+     * @var StructuredLogger
+     */
+    private $structured_logger;
 
-	/**
-	 * Image processor instance.
-	 *
-	 * @since 1.0.0
-	 * @var ImageProcessorInterface
-	 */
-	private $processor;
+    /**
+     * Image processor instance.
+     *
+     * @since 1.0.0
+     * @var ImageProcessorInterface
+     */
+    private $processor;
 
-	/**
-	 * Supported image formats.
-	 *
-	 * @since 1.0.0
-	 * @var array
-	 */
-	private $supported_formats = [
-		'image/jpeg',
-		'image/png',
-		'image/gif',
-		'image/webp',
-	];
+    /**
+     * Quota manager instance.
+     *
+     * @since 1.0.0
+     * @var QuotaManager
+     */
+    private $quota_manager;
 
-	/**
-	 * Constructor.
-	 *
-	 * @since 1.0.0
-	 * @param Logger $logger Logger instance.
-	 */
-	public function __construct( Logger $logger ) {
-		$this->logger = $logger;
-		$this->structured_logger = new StructuredLogger( $logger );
-		$this->processor = $this->get_available_processor();
-	}
+    /**
+     * Supported image formats.
+     *
+     * @since 1.0.0
+     * @var array
+     */
+    private $supported_formats = [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+    ];
+
+    /**
+     * Source file path for fluent interface.
+     *
+     * @since 1.0.0
+     * @var string|null
+     */
+    private $source_path;
+
+    /**
+     * Destination file path for fluent interface.
+     *
+     * @since 1.0.0
+     * @var string|null
+     */
+    private $destination_path;
+
+    /**
+     * Conversion options for fluent interface.
+     *
+     * @since 1.0.0
+     * @var array
+     */
+    private $options = [];
+
+    /**
+     * Error messages for fluent interface.
+     *
+     * @since 1.0.0
+     * @var array
+     */
+    private $errors = [];
+
+    /**
+     * Constructor.
+     *
+     * @since 1.0.0
+     * @param Logger $logger Logger instance.
+     * @param QuotaManager $quota_manager Quota manager instance.
+     */
+    public function __construct( Logger $logger, QuotaManager $quota_manager ) {
+        $this->logger = $logger;
+        $this->structured_logger = new StructuredLogger( $logger );
+        $this->quota_manager = $quota_manager;
+        $this->processor = $this->get_available_processor();
+    }
 
 	/**
 	 * Get the available image processor (Imagick or GD).
@@ -79,7 +124,7 @@ class ImageConverter {
 	private function get_available_processor() {
 		// Prefer Imagick for better quality and more features.
 		if ( class_exists( 'Imagick' ) && extension_loaded( 'imagick' ) ) {
-			$imagick = new \Imagick();
+			$imagick = new Imagick();
 			$formats = $imagick->queryFormats();
 			
 			// Check if Imagick supports WebP and AVIF.
@@ -392,16 +437,19 @@ class ImageConverter {
 			return $results;
 		}
 
+		// Create destination paths for all requested formats
+		$destination_paths = [];
+		foreach ( $image_formats as $format ) {
+			$destination_paths[ $format ] = $file_dir . '/' . $file_name . '.' . $format;
+		}
+
 		// Process based on settings
 		if ( $hybrid_approach && in_array( 'webp', $image_formats, true ) && in_array( 'avif', $image_formats, true ) ) {
 			// Hybrid approach - create both WebP and AVIF
-			$webp_path = $file_dir . '/' . $file_name . '.webp';
-			$avif_path = $file_dir . '/' . $file_name . '.avif';
-
 			$conversion_results = $this->convert_hybrid(
 				$file_path,
-				$webp_path,
-				$avif_path,
+				$destination_paths['webp'],
+				$destination_paths['avif'],
 				['quality' => $webp_quality],
 				['quality' => max( 60, $webp_quality - 10 )] // AVIF typically needs lower quality for similar file size
 			);
@@ -416,15 +464,14 @@ class ImageConverter {
 		} else {
 			// Individual format conversion
 			foreach ( $image_formats as $format ) {
-				$destination_path = $file_dir . '/' . $file_name . '.' . $format;
 				$conversion_options = ['quality' => $webp_quality];
 
 				$success = false;
 				if ( 'webp' === $format ) {
-					$success = $this->convert_to_webp( $file_path, $destination_path, $conversion_options );
+					$success = $this->convert_to_webp( $file_path, $destination_paths[ $format ], $conversion_options );
 				} elseif ( 'avif' === $format ) {
 					$conversion_options['quality'] = max( 60, $webp_quality - 10 );
-					$success = $this->convert_to_avif( $file_path, $destination_path, $conversion_options );
+					$success = $this->convert_to_avif( $file_path, $destination_paths[ $format ], $conversion_options );
 				}
 
 				if ( $success ) {
@@ -436,12 +483,280 @@ class ImageConverter {
 		// Update results
 		$results['success'] = ! empty( $results['converted_formats'] );
 
-		// Store conversion metadata
+		// Store conversion metadata and track quota usage
 		if ( $results['success'] ) {
+			// Record quota usage for each successful conversion
+			$converted_count = count( $results['converted_formats'] );
+			for ( $i = 0; $i < $converted_count; $i++ ) {
+				$this->quota_manager->record_usage( 'image' );
+			}
+			
 			update_post_meta( $attachment_id, '_flux_media_converted_formats', $results['converted_formats'] );
 			update_post_meta( $attachment_id, '_flux_media_conversion_date', current_time( 'mysql' ) );
+			
+			// Store converted file paths for later reference (reuse the same paths)
+			$converted_files = [];
+			foreach ( $results['converted_formats'] as $format ) {
+				$converted_files[ $format ] = $destination_paths[ $format ];
+			}
+			update_post_meta( $attachment_id, '_flux_media_converted_files', $converted_files );
+			
+			// Log quota usage
+			$this->logger->info( "Image conversion quota: {$converted_count} images used for attachment {$attachment_id}" );
 		}
 
 		return $results;
+	}
+
+	/**
+	 * Get converted file paths for an attachment.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id WordPress attachment ID.
+	 * @return array Array of format => file_path mappings.
+	 */
+	public function get_converted_files( $attachment_id ) {
+		return get_post_meta( $attachment_id, '_flux_media_converted_files', true ) ?: [];
+	}
+
+	/**
+	 * Get converted file path for a specific format.
+	 *
+	 * @since 1.0.0
+	 * @param int    $attachment_id WordPress attachment ID.
+	 * @param string $format Target format (webp, avif).
+	 * @return string|null File path or null if not found.
+	 */
+	public function get_converted_file_path( $attachment_id, $format ) {
+		$converted_files = $this->get_converted_files( $attachment_id );
+		return $converted_files[ $format ] ?? null;
+	}
+
+	/**
+	 * Check if attachment has converted files.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id WordPress attachment ID.
+	 * @return bool True if converted files exist, false otherwise.
+	 */
+	public function has_converted_files( $attachment_id ) {
+		$converted_files = $this->get_converted_files( $attachment_id );
+		return ! empty( $converted_files );
+	}
+
+	// ===== Converter Interface Implementation =====
+
+	/**
+	 * Set the source file path.
+	 *
+	 * @since 1.0.0
+	 * @param string $source_path Source file path.
+	 * @return Converter Fluent interface.
+	 */
+	public function from( $source_path ) {
+		$this->source_path = $source_path;
+		return $this;
+	}
+
+	/**
+	 * Set the destination file path.
+	 *
+	 * @since 1.0.0
+	 * @param string $destination_path Destination file path.
+	 * @return Converter Fluent interface.
+	 */
+	public function to( $destination_path ) {
+		$this->destination_path = $destination_path;
+		return $this;
+	}
+
+	/**
+	 * Set conversion options.
+	 *
+	 * @since 1.0.0
+	 * @param array $options Conversion options.
+	 * @return Converter Fluent interface.
+	 */
+	public function with_options( $options ) {
+		$this->options = array_merge( $this->options, $options );
+		return $this;
+	}
+
+	/**
+	 * Set a specific option.
+	 *
+	 * @since 1.0.0
+	 * @param string $key Option key.
+	 * @param mixed  $value Option value.
+	 * @return Converter Fluent interface.
+	 */
+	public function set_option( $key, $value ) {
+		$this->options[ $key ] = $value;
+		return $this;
+	}
+
+	/**
+	 * Perform the conversion using fluent interface.
+	 *
+	 * @since 1.0.0
+	 * @return bool True on success, false on failure.
+	 */
+	public function convert() {
+		// Reset errors
+		$this->errors = [];
+
+		// Validate inputs
+		if ( ! $this->validate_inputs() ) {
+			return false;
+		}
+
+		// Determine target format from destination path
+		$target_format = $this->get_target_format();
+		if ( ! $target_format ) {
+			$this->add_error( 'Unable to determine target format from destination path' );
+			return false;
+		}
+
+		// Perform conversion based on format
+		if ( Converter::FORMAT_WEBP === $target_format ) {
+			return $this->convert_to_webp( $this->source_path, $this->destination_path, $this->options );
+		} elseif ( Converter::FORMAT_AVIF === $target_format ) {
+			return $this->convert_to_avif( $this->source_path, $this->destination_path, $this->options );
+		}
+
+		$this->add_error( "Unsupported target format: {$target_format}" );
+		return false;
+	}
+
+	/**
+	 * Get the last error message.
+	 *
+	 * @since 1.0.0
+	 * @return string|null Error message or null if no error.
+	 */
+	public function get_last_error() {
+		return ! empty( $this->errors ) ? end( $this->errors ) : null;
+	}
+
+	/**
+	 * Get all error messages.
+	 *
+	 * @since 1.0.0
+	 * @return array Array of error messages.
+	 */
+	public function get_errors() {
+		return $this->errors;
+	}
+
+	/**
+	 * Check if conversion is supported.
+	 *
+	 * @since 1.0.0
+	 * @param string $format Target format.
+	 * @return bool True if supported, false otherwise.
+	 */
+	public function is_format_supported( $format ) {
+		return in_array( $format, [ Converter::FORMAT_WEBP, Converter::FORMAT_AVIF ], true );
+	}
+
+	/**
+	 * Get supported formats for this converter.
+	 *
+	 * @since 1.0.0
+	 * @return array Array of supported formats.
+	 */
+	public function get_supported_formats() {
+		return [ Converter::FORMAT_WEBP, Converter::FORMAT_AVIF ];
+	}
+
+	/**
+	 * Get converter type.
+	 *
+	 * @since 1.0.0
+	 * @return string Converter type constant.
+	 */
+	public function get_type() {
+		return Converter::TYPE_IMAGE;
+	}
+
+	/**
+	 * Reset the converter state.
+	 *
+	 * @since 1.0.0
+	 * @return Converter Fluent interface.
+	 */
+	public function reset() {
+		$this->source_path = null;
+		$this->destination_path = null;
+		$this->options = [];
+		$this->errors = [];
+		return $this;
+	}
+
+	/**
+	 * Validate input parameters for fluent interface.
+	 *
+	 * @since 1.0.0
+	 * @return bool True if valid, false otherwise.
+	 */
+	private function validate_inputs() {
+		if ( empty( $this->source_path ) ) {
+			$this->add_error( 'Source path is required' );
+			return false;
+		}
+
+		if ( ! file_exists( $this->source_path ) ) {
+			$this->add_error( "Source file does not exist: {$this->source_path}" );
+			return false;
+		}
+
+		if ( empty( $this->destination_path ) ) {
+			$this->add_error( 'Destination path is required' );
+			return false;
+		}
+
+		// Check if destination directory exists and is writable
+		$destination_dir = dirname( $this->destination_path );
+		if ( ! is_dir( $destination_dir ) ) {
+			$this->add_error( "Destination directory does not exist: {$destination_dir}" );
+			return false;
+		}
+
+		if ( ! is_writable( $destination_dir ) ) {
+			$this->add_error( "Destination directory is not writable: {$destination_dir}" );
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Add an error message.
+	 *
+	 * @since 1.0.0
+	 * @param string $message Error message.
+	 * @return void
+	 */
+	private function add_error( $message ) {
+		$this->errors[] = $message;
+	}
+
+	/**
+	 * Get target format from destination path.
+	 *
+	 * @since 1.0.0
+	 * @return string|null Target format or null if unable to determine.
+	 */
+	private function get_target_format() {
+		$extension = strtolower( pathinfo( $this->destination_path, PATHINFO_EXTENSION ) );
+		
+		switch ( $extension ) {
+			case 'webp':
+				return Converter::FORMAT_WEBP;
+			case 'avif':
+				return Converter::FORMAT_AVIF;
+			default:
+				return null;
+		}
 	}
 }
