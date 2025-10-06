@@ -9,6 +9,7 @@ import {
   Alert,
   AlertTitle,
   Divider,
+  Skeleton,
 } from '@mui/material';
 import {
   TrendingUp,
@@ -16,6 +17,7 @@ import {
   Image,
   Upgrade,
 } from '@mui/icons-material';
+import { __ } from '@wordpress/i18n';
 
 /**
  * Dumb component for displaying quota progress
@@ -24,29 +26,49 @@ const QuotaProgressCard = ({ quota, loading, error, onUpgrade }) => {
   // Handle loading state
   if (loading) {
     return (
-      <Box sx={{ p: 3, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      <Box>
         <Grid container justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
           <Grid item>
-            <Box sx={{ width: '35%', height: 32, bgcolor: 'grey.300', borderRadius: 1, mb: 1 }} />
-            <Box sx={{ width: '25%', height: 20, bgcolor: 'grey.300', borderRadius: 1 }} />
+            <Skeleton variant="text" width="35%" height={40} sx={{ mb: 1 }} />
+            <Skeleton variant="text" width="25%" height={24} />
           </Grid>
           <Grid item>
-            <Box sx={{ width: 100, height: 36, bgcolor: 'grey.300', borderRadius: 1 }} />
+            <Skeleton variant="rectangular" width={100} height={36} sx={{ borderRadius: 1 }} />
           </Grid>
         </Grid>
+        <Divider sx={{ mb: 3 }} />
         
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 3 }}>
-          <Box>
-            <Box sx={{ width: '40%', height: 20, bgcolor: 'grey.300', borderRadius: 1, mb: 1 }} />
-            <Box sx={{ width: '100%', height: 8, bgcolor: 'grey.300', borderRadius: 1, mb: 1 }} />
-            <Box sx={{ width: '30%', height: 16, bgcolor: 'grey.300', borderRadius: 1 }} />
-          </Box>
-          <Box>
-            <Box sx={{ width: '40%', height: 20, bgcolor: 'grey.300', borderRadius: 1, mb: 1 }} />
-            <Box sx={{ width: '100%', height: 8, bgcolor: 'grey.300', borderRadius: 1, mb: 1 }} />
-            <Box sx={{ width: '30%', height: 16, bgcolor: 'grey.300', borderRadius: 1 }} />
-          </Box>
-        </Box>
+        <Grid container spacing={3}>
+          {/* Image Quota Skeleton */}
+          <Grid item xs={12} md={6}>
+            <Box>
+              <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
+              <Skeleton variant="text" width="60%" height={48} sx={{ mb: 1 }} />
+              <Skeleton variant="text" width="30%" height={20} sx={{ mb: 2 }} />
+              <Skeleton variant="rectangular" height={8} sx={{ borderRadius: 4, mb: 1 }} />
+              <Skeleton variant="text" width="25%" height={16} />
+            </Box>
+          </Grid>
+
+          {/* Video Quota Skeleton */}
+          <Grid item xs={12} md={6}>
+            <Box>
+              <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
+              <Skeleton variant="text" width="60%" height={48} sx={{ mb: 1 }} />
+              <Skeleton variant="text" width="30%" height={20} sx={{ mb: 2 }} />
+              <Skeleton variant="rectangular" height={8} sx={{ borderRadius: 4, mb: 1 }} />
+              <Skeleton variant="text" width="25%" height={16} />
+            </Box>
+          </Grid>
+
+          {/* Quota Status Skeleton */}
+          <Grid item xs={12}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Skeleton variant="text" width="30%" height={20} />
+              <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+            </Box>
+          </Grid>
+        </Grid>
       </Box>
     );
   }
@@ -187,7 +209,7 @@ const QuotaProgressCard = ({ quota, loading, error, onUpgrade }) => {
           <Grid item xs={12}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Typography variant="body2" color="text.secondary">
-                Next reset: {quota.nextReset ? formatDate(quota.nextReset) : 'Unknown'}
+                {__('Next reset:', 'flux-media')} {quota.next_reset ? formatDate(quota.next_reset) : __('Unknown', 'flux-media')}
               </Typography>
               <Chip
                 label={plan.toUpperCase()}

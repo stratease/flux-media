@@ -7,6 +7,7 @@ import {
   Alert,
   AlertTitle,
   Divider,
+  Skeleton,
 } from '@mui/material';
 import {
   CheckCircle,
@@ -21,29 +22,63 @@ const SystemStatusCard = ({ status, loading, error }) => {
   // Handle loading state
   if (loading) {
     return (
-      <Box sx={{ p: 3, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      <Box>
         <Box sx={{ mb: 3 }}>
-          <Box sx={{ width: '30%', height: 32, bgcolor: 'grey.300', borderRadius: 1, mb: 2 }} />
-          <Box sx={{ width: '50%', height: 20, bgcolor: 'grey.300', borderRadius: 1, mb: 3 }} />
+          <Skeleton variant="text" width="30%" height={40} sx={{ mb: 1 }} />
+          <Skeleton variant="text" width="50%" height={24} />
         </Box>
+        <Divider sx={{ mb: 3 }} />
         
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item>
-            <Box sx={{ width: 120, height: 40, bgcolor: 'grey.300', borderRadius: 1 }} />
+        <Grid container spacing={3}>
+          {/* Image Processing Skeleton */}
+          <Grid item xs={12} md={6}>
+            <Box>
+              <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
+              <Skeleton variant="rectangular" width={120} height={32} sx={{ borderRadius: 1, mb: 2 }} />
+              <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+              </Box>
+            </Box>
           </Grid>
-          <Grid item>
-            <Box sx={{ width: 120, height: 40, bgcolor: 'grey.300', borderRadius: 1 }} />
+
+          {/* Video Processing Skeleton */}
+          <Grid item xs={12} md={6}>
+            <Box>
+              <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
+              <Skeleton variant="rectangular" width={120} height={32} sx={{ borderRadius: 1, mb: 2 }} />
+              <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+              </Box>
+            </Box>
           </Grid>
-          <Grid item>
-            <Box sx={{ width: 120, height: 40, bgcolor: 'grey.300', borderRadius: 1 }} />
+
+          {/* PHP Configuration Skeleton */}
+          <Grid item xs={12}>
+            <Skeleton variant="text" width="30%" height={32} sx={{ mb: 2 }} />
+            <Grid container spacing={2}>
+              <Grid item xs={6} sm={3}>
+                <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+                <Skeleton variant="text" width="80%" height={24} />
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+                <Skeleton variant="text" width="80%" height={24} />
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+                <Skeleton variant="text" width="80%" height={24} />
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
+                <Skeleton variant="text" width="80%" height={24} />
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
-        
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
-          <Box sx={{ width: '100%', height: 60, bgcolor: 'grey.300', borderRadius: 1 }} />
-          <Box sx={{ width: '100%', height: 60, bgcolor: 'grey.300', borderRadius: 1 }} />
-          <Box sx={{ width: '100%', height: 60, bgcolor: 'grey.300', borderRadius: 1 }} />
-        </Box>
       </Box>
     );
   }
@@ -90,19 +125,19 @@ const SystemStatusCard = ({ status, loading, error }) => {
   const videoProcessor = status.videoProcessor || {};
 
   const hasImageSupport = imageProcessor.available && 
-    (imageProcessor.webpSupport || imageProcessor.avifSupport);
+    (imageProcessor.webp_support || imageProcessor.avif_support);
   
   const hasVideoSupport = videoProcessor.available && 
-    (videoProcessor.av1Support || videoProcessor.webmSupport);
+    (videoProcessor.av1_support || videoProcessor.webm_support);
 
   return (
     <Box>
       <Box sx={{ mb: 3 }}>
         <Typography variant="h5" gutterBottom>
-          System Status
+          {__('System Status', 'flux-media')}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Current system capabilities and requirements
+          {__('Current system capabilities and requirements', 'flux-media')}
         </Typography>
       </Box>
       <Divider sx={{ mb: 3 }} />
@@ -111,7 +146,7 @@ const SystemStatusCard = ({ status, loading, error }) => {
           <Grid item xs={12} md={6}>
             <Box>
               <Typography variant="h6" gutterBottom>
-                Image Processing
+                {__('Image Processing', 'flux-media')}
               </Typography>
               <Box sx={{ mb: 2 }}>
                 {getStatusChip(imageProcessor.available, (imageProcessor.type || 'Unknown').toUpperCase())}
@@ -120,20 +155,20 @@ const SystemStatusCard = ({ status, loading, error }) => {
               {imageProcessor.available && (
                 <Box sx={{ ml: 2 }}>
                   <Typography variant="body2" color="text.secondary">
-                    Version: {imageProcessor.version || 'Unknown'}
+                    {__('Version:', 'flux-media')} {imageProcessor.version || __('Unknown', 'flux-media')}
                   </Typography>
                   <Grid container spacing={1} sx={{ mt: 1 }}>
                     <Grid item>
                       <Chip
                         label="WebP"
-                        color={imageProcessor.webpSupport ? 'success' : 'default'}
+                        color={imageProcessor.webp_support ? 'success' : 'default'}
                         size="small"
                       />
                     </Grid>
                     <Grid item>
                       <Chip
                         label="AVIF"
-                        color={imageProcessor.avifSupport ? 'success' : 'default'}
+                        color={imageProcessor.avif_support ? 'success' : 'default'}
                         size="small"
                       />
                     </Grid>
@@ -147,7 +182,7 @@ const SystemStatusCard = ({ status, loading, error }) => {
           <Grid item xs={12} md={6}>
             <Box>
               <Typography variant="h6" gutterBottom>
-                Video Processing
+                {__('Video Processing', 'flux-media')}
               </Typography>
               <Box sx={{ mb: 2 }}>
                 {getStatusChip(videoProcessor.available, (videoProcessor.type || 'Unknown').toUpperCase())}
@@ -156,20 +191,20 @@ const SystemStatusCard = ({ status, loading, error }) => {
               {videoProcessor.available && (
                 <Box sx={{ ml: 2 }}>
                   <Typography variant="body2" color="text.secondary">
-                    Version: {videoProcessor.version || 'Unknown'}
+                    {__('Version:', 'flux-media')} {videoProcessor.version || __('Unknown', 'flux-media')}
                   </Typography>
                   <Grid container spacing={1} sx={{ mt: 1 }}>
                     <Grid item>
                       <Chip
                         label="AV1"
-                        color={videoProcessor.av1Support ? 'success' : 'default'}
+                        color={videoProcessor.av1_support ? 'success' : 'default'}
                         size="small"
                       />
                     </Grid>
                     <Grid item>
                       <Chip
                         label="WebM"
-                        color={videoProcessor.webmSupport ? 'success' : 'default'}
+                        color={videoProcessor.webm_support ? 'success' : 'default'}
                         size="small"
                       />
                     </Grid>
@@ -182,39 +217,39 @@ const SystemStatusCard = ({ status, loading, error }) => {
           {/* PHP Configuration */}
           <Grid item xs={12}>
             <Typography variant="h6" gutterBottom>
-              PHP Configuration
+              {__('PHP Configuration', 'flux-media')}
             </Typography>
             <Grid container spacing={2}>
               <Grid item xs={6} sm={3}>
                 <Typography variant="body2" color="text.secondary">
-                  PHP Version
+                  {__('PHP Version', 'flux-media')}
                 </Typography>
                 <Typography variant="body1">
-                  {status.phpVersion || 'Unknown'}
+                  {status.phpVersion || __('Unknown', 'flux-media')}
                 </Typography>
               </Grid>
               <Grid item xs={6} sm={3}>
                 <Typography variant="body2" color="text.secondary">
-                  Memory Limit
+                  {__('Memory Limit', 'flux-media')}
                 </Typography>
                 <Typography variant="body1">
-                  {status.memoryLimit || 'Unknown'}
+                  {status.memoryLimit || __('Unknown', 'flux-media')}
                 </Typography>
               </Grid>
               <Grid item xs={6} sm={3}>
                 <Typography variant="body2" color="text.secondary">
-                  Max Execution Time
+                  {__('Max Execution Time', 'flux-media')}
                 </Typography>
                 <Typography variant="body1">
-                  {status.maxExecutionTime || 'Unknown'}s
+                  {status.maxExecutionTime || __('Unknown', 'flux-media')}s
                 </Typography>
               </Grid>
               <Grid item xs={6} sm={3}>
                 <Typography variant="body2" color="text.secondary">
-                  Upload Max Filesize
+                  {__('Upload Max Filesize', 'flux-media')}
                 </Typography>
                 <Typography variant="body1">
-                  {status.uploadMaxFilesize || 'Unknown'}
+                  {status.uploadMaxFilesize || __('Unknown', 'flux-media')}
                 </Typography>
               </Grid>
             </Grid>
@@ -224,14 +259,14 @@ const SystemStatusCard = ({ status, loading, error }) => {
           {(!hasImageSupport || !hasVideoSupport) && (
             <Grid item xs={12}>
               <Alert severity="warning">
-                <AlertTitle>System Requirements Not Met</AlertTitle>
+                <AlertTitle>{__('System Requirements Not Met', 'flux-media')}</AlertTitle>
                 <Typography variant="body2">
                   {!hasImageSupport && !hasVideoSupport && 
-                    'Neither image nor video processing is available. Please install Imagick/GD with WebP/AVIF support and FFmpeg with AV1/WebM support.'}
+                    __('Neither image nor video processing is available. Please install Imagick/GD with WebP/AVIF support and FFmpeg with AV1/WebM support.', 'flux-media')}
                   {!hasImageSupport && hasVideoSupport && 
-                    'Image processing is not available. Please install Imagick or GD with WebP/AVIF support.'}
+                    __('Image processing is not available. Please install Imagick or GD with WebP/AVIF support.', 'flux-media')}
                   {hasImageSupport && !hasVideoSupport && 
-                    'Video processing is not available. Please install FFmpeg with AV1/WebM support.'}
+                    __('Video processing is not available. Please install FFmpeg with AV1/WebM support.', 'flux-media')}
                 </Typography>
               </Alert>
             </Grid>
@@ -240,9 +275,9 @@ const SystemStatusCard = ({ status, loading, error }) => {
           {hasImageSupport && hasVideoSupport && (
             <Grid item xs={12}>
               <Alert severity="success">
-                <AlertTitle>System Ready</AlertTitle>
+                <AlertTitle>{__('System Ready', 'flux-media')}</AlertTitle>
                 <Typography variant="body2">
-                  All required components are available. Flux Media can optimize both images and videos.
+                  {__('All required components are available. Flux Media can optimize both images and videos.', 'flux-media')}
                 </Typography>
               </Alert>
             </Grid>

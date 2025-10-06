@@ -10,14 +10,12 @@ import { apiService } from '@flux-media/services/api';
  */
 const SettingsPage = () => {
   const [settings, setSettings] = useState({
-    autoConvert: true,
-    quality: 85,
-    webpEnabled: true,
-    avifEnabled: true,
-    hybridApproach: true, // New hybrid approach setting
-    av1Enabled: true,
-    webmEnabled: true,
-    licenseKey: '',
+    image_auto_convert: true,
+    image_webp_quality: 85,
+    image_formats: ['webp', 'avif'],
+    hybrid_approach: true,
+    video_formats: ['av1', 'webm'],
+    license_key: '',
   });
 
   const [error, setError] = useState(null);
@@ -30,7 +28,7 @@ const SettingsPage = () => {
     const loadSettings = async () => {
       try {
         const response = await apiService.getOptions();
-        // The API service now returns the mapped frontend format directly
+        // Use backend field names directly
         if (response && typeof response === 'object') {
           setSettings(prev => ({
             ...prev,
@@ -93,8 +91,8 @@ const SettingsPage = () => {
                       <FormControlLabel
                         control={
                           <Switch
-                            checked={settings.autoConvert}
-                            onChange={handleSettingChange('autoConvert')}
+                            checked={settings.image_auto_convert}
+                            onChange={handleSettingChange('image_auto_convert')}
                           />
                         }
                         label={__('Auto-convert on upload', 'flux-media')}
@@ -103,20 +101,25 @@ const SettingsPage = () => {
                       <FormControlLabel
                         control={
                           <Switch
-                            checked={settings.hybridApproach}
-                            onChange={handleSettingChange('hybridApproach')}
+                            checked={settings.hybrid_approach}
+                            onChange={handleSettingChange('hybrid_approach')}
                           />
                         }
                         label={__('Hybrid approach (WebP + AVIF)', 'flux-media')}
                       />
               
-              {!settings.hybridApproach && (
+              {!settings.hybrid_approach && (
                 <>
                   <FormControlLabel
                     control={
                       <Switch
-                        checked={settings.webpEnabled}
-                        onChange={handleSettingChange('webpEnabled')}
+                        checked={settings.image_formats?.includes('webp')}
+                        onChange={(e) => {
+                          const newFormats = e.target.checked 
+                            ? [...(settings.image_formats || []).filter(f => f !== 'webp'), 'webp']
+                            : (settings.image_formats || []).filter(f => f !== 'webp');
+                          handleSettingChange('image_formats')({ target: { value: newFormats } });
+                        }}
                       />
                     }
                     label={__('Enable WebP conversion', 'flux-media')}
@@ -125,8 +128,13 @@ const SettingsPage = () => {
                   <FormControlLabel
                     control={
                       <Switch
-                        checked={settings.avifEnabled}
-                        onChange={handleSettingChange('avifEnabled')}
+                        checked={settings.image_formats?.includes('avif')}
+                        onChange={(e) => {
+                          const newFormats = e.target.checked 
+                            ? [...(settings.image_formats || []).filter(f => f !== 'avif'), 'avif']
+                            : (settings.image_formats || []).filter(f => f !== 'avif');
+                          handleSettingChange('image_formats')({ target: { value: newFormats } });
+                        }}
                       />
                     }
                     label={__('Enable AVIF conversion', 'flux-media')}
@@ -135,7 +143,7 @@ const SettingsPage = () => {
               )}
                     </Stack>
             
-            {settings.hybridApproach && (
+            {settings.hybrid_approach && (
               <Box sx={{ mt: 2, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
                 <Typography variant="body2" color="info.contrastText">
                   <strong>{__('Hybrid Approach:', 'flux-media')}</strong> {__('Creates both WebP and AVIF formats. Serves AVIF where supported (via <picture> tags or server detection), with WebP as fallback. This is the recommended approach for maximum performance and compatibility.', 'flux-media')}
@@ -155,8 +163,13 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings.av1Enabled}
-                    onChange={handleSettingChange('av1Enabled')}
+                    checked={settings.video_formats?.includes('av1')}
+                    onChange={(e) => {
+                      const newFormats = e.target.checked 
+                        ? [...(settings.video_formats || []).filter(f => f !== 'av1'), 'av1']
+                        : (settings.video_formats || []).filter(f => f !== 'av1');
+                      handleSettingChange('video_formats')({ target: { value: newFormats } });
+                    }}
                   />
                 }
                 label={__('Enable AV1 conversion', 'flux-media')}
@@ -165,8 +178,13 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings.webmEnabled}
-                    onChange={handleSettingChange('webmEnabled')}
+                    checked={settings.video_formats?.includes('webm')}
+                    onChange={(e) => {
+                      const newFormats = e.target.checked 
+                        ? [...(settings.video_formats || []).filter(f => f !== 'webm'), 'webm']
+                        : (settings.video_formats || []).filter(f => f !== 'webm');
+                      handleSettingChange('video_formats')({ target: { value: newFormats } });
+                    }}
                   />
                 }
                 label={__('Enable WebM conversion', 'flux-media')}
@@ -183,14 +201,14 @@ const SettingsPage = () => {
               {__('Quality Settings', 'flux-media')}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {__('Quality:', 'flux-media')} {settings.quality}% ({__('Higher values produce larger files with better quality', 'flux-media')})
+              {__('Quality:', 'flux-media')} {settings.image_webp_quality}% ({__('Higher values produce larger files with better quality', 'flux-media')})
             </Typography>
             <input
               type="range"
               min="60"
               max="100"
-              value={settings.quality}
-              onChange={handleSettingChange('quality')}
+              value={settings.image_webp_quality}
+              onChange={handleSettingChange('image_webp_quality')}
               style={{ width: '100%' }}
             />
           </Box>
@@ -210,8 +228,8 @@ const SettingsPage = () => {
               fullWidth
               label={__('License Key', 'flux-media')}
               placeholder={__('Enter your license key', 'flux-media')}
-              value={settings.licenseKey}
-              onChange={handleSettingChange('licenseKey')}
+              value={settings.license_key}
+              onChange={handleSettingChange('license_key')}
               variant="outlined"
               size="small"
               sx={{ maxWidth: 400 }}

@@ -9,15 +9,6 @@ import { SystemStatusContainer, QuotaProgressContainer } from '@flux-media/compo
 const OverviewPage = () => {
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h3" component="h1" gutterBottom>
-          {__('Flux Media Overview', 'flux-media')}
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary">
-          {__('Advanced image and video optimization for WordPress', 'flux-media')}
-        </Typography>
-      </Box>
-
       <Grid container spacing={3}>
         {/* System Status */}
         <Grid item xs={12}>

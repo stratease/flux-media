@@ -56,7 +56,13 @@ class ApiService {
       
       console.log('API Response:', response);
       
-      // WordPress apiFetch returns the data directly for successful requests
+      // Handle the new structured response format
+      if (response && typeof response === 'object' && response.success !== undefined) {
+        // New format: { success: true, data: {...}, message: "...", timestamp: "..." }
+        return response.data;
+      }
+      
+      // Legacy format: return data directly
       return response;
     } catch (error) {
       console.error('API Error:', error);
@@ -105,95 +111,17 @@ class ApiService {
 
   // Options endpoints
   async getOptions() {
-    const response = await this.request('/options');
-    // Map backend options to frontend format
-    if (response && typeof response === 'object') {
-      return this.mapOptionsToFrontend(response);
-    }
-    return response;
+    return this.request('/options');
   }
 
   async updateOptions(options) {
-    // Map frontend field names to backend field names
-    const mappedOptions = this.mapOptionsToBackend(options);
-    
     return this.request('/options', {
       method: 'POST',
-      body: JSON.stringify(mappedOptions),
+      body: JSON.stringify(options),
     });
   }
 
-  /**
-   * Map frontend option names to backend option names
-   * @param {Object} frontendOptions - Options from frontend
-   * @returns {Object} Mapped options for backend
-   */
-  mapOptionsToBackend(frontendOptions) {
-    const mapping = {
-      autoConvert: 'image_auto_convert',
-      quality: 'image_webp_quality',
-      webpEnabled: 'image_formats', // This will be handled specially
-      avifEnabled: 'image_formats', // This will be handled specially
-      hybridApproach: 'hybrid_approach',
-      av1Enabled: 'video_formats', // This will be handled specially
-      webmEnabled: 'video_formats', // This will be handled specially
-      licenseKey: 'license_key',
-    };
 
-    const backendOptions = {};
-
-    // Handle simple mappings
-    Object.keys(frontendOptions).forEach(key => {
-      if (mapping[key] && !['webpEnabled', 'avifEnabled', 'av1Enabled', 'webmEnabled'].includes(key)) {
-        backendOptions[mapping[key]] = frontendOptions[key];
-      }
-    });
-
-    // Handle image formats
-    if (frontendOptions.hybridApproach) {
-      backendOptions.image_formats = ['webp', 'avif'];
-    } else {
-      const imageFormats = [];
-      if (frontendOptions.webpEnabled) imageFormats.push('webp');
-      if (frontendOptions.avifEnabled) imageFormats.push('avif');
-      backendOptions.image_formats = imageFormats;
-    }
-
-    // Handle video formats
-    const videoFormats = [];
-    if (frontendOptions.av1Enabled) videoFormats.push('av1');
-    if (frontendOptions.webmEnabled) videoFormats.push('webm');
-    backendOptions.video_formats = videoFormats;
-
-    return backendOptions;
-  }
-
-  /**
-   * Map backend option names to frontend option names
-   * @param {Object} backendOptions - Options from backend
-   * @returns {Object} Mapped options for frontend
-   */
-  mapOptionsToFrontend(backendOptions) {
-    const frontendOptions = {};
-
-    // Simple mappings
-    frontendOptions.autoConvert = backendOptions.image_auto_convert ?? true;
-    frontendOptions.quality = backendOptions.image_webp_quality ?? 85;
-    frontendOptions.hybridApproach = backendOptions.hybrid_approach ?? true;
-    frontendOptions.licenseKey = backendOptions.license_key ?? '';
-
-    // Handle image formats
-    const imageFormats = backendOptions.image_formats ?? ['webp', 'avif'];
-    frontendOptions.webpEnabled = imageFormats.includes('webp');
-    frontendOptions.avifEnabled = imageFormats.includes('avif');
-
-    // Handle video formats
-    const videoFormats = backendOptions.video_formats ?? ['av1', 'webm'];
-    frontendOptions.av1Enabled = videoFormats.includes('av1');
-    frontendOptions.webmEnabled = videoFormats.includes('webm');
-
-    return frontendOptions;
-  }
 
   // Conversion operations
   async startConversion(attachmentId, format) {
