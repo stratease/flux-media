@@ -23,9 +23,9 @@ class Options {
 	 */
 	private static $defaults = [
 		// Image conversion settings.
-		'image_webp_quality' => 85,
+		'image_webp_quality' => 75,
 		'image_webp_lossless' => false,
-		'image_avif_quality' => 80,
+		'image_avif_quality' => 70,
 		'image_avif_speed' => 6,
 		'image_auto_convert' => true,
 		'image_formats' => [ 'webp', 'avif' ],

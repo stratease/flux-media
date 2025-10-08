@@ -38,6 +38,8 @@
     },
     "scripts": {
         "test": "phpunit",
+        "test:unit": "phpunit tests/unit",
+        "test:coverage": "phpunit --coverage-html coverage tests/unit",
         "phpstan": "phpstan analyse",
         "phpcs": "phpcs --standard=WordPress src/ tests/",
         "phpcbf": "phpcbf --standard=WordPress src/ tests/",

@@ -11,6 +11,7 @@ namespace FluxMedia\Api\Controllers;
 use FluxMedia\Core\Container;
 use FluxMedia\Services\ConversionTracker;
 use FluxMedia\Services\QuotaManager;
+use FluxMedia\Utils\Logger;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
@@ -225,7 +226,8 @@ class ConversionsController extends BaseController {
 			$format = sanitize_text_field( $params['format'] );
 
 			// Check quota before starting conversion.
-			$quota_manager = new QuotaManager();
+			$logger = new Logger();
+			$quota_manager = new QuotaManager( $logger );
 			$media_type = in_array( $format, [ 'webp', 'avif' ], true ) ? 'image' : 'video';
 
 			if ( ! $quota_manager->can_convert( $media_type ) ) {

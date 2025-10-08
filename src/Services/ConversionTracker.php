@@ -8,249 +8,195 @@
 
 namespace FluxMedia\Services;
 
-use FluxMedia\Core\Database;
-use FluxMedia\Models\ConversionRecord;
+use FluxMedia\Utils\Logger;
 
 /**
- * Service for tracking media conversions.
+ * Handles tracking of converted files in the database.
  *
  * @since 1.0.0
  */
 class ConversionTracker {
 
 	/**
-	 * Database instance.
+	 * Database table name.
 	 *
 	 * @since 1.0.0
-	 * @var Database
+	 * @var string
 	 */
-	private $database;
+	private $table_name;
+
+	/**
+	 * Logger instance.
+	 *
+	 * @since 1.0.0
+	 * @var Logger
+	 */
+	private $logger;
+
 
 	/**
 	 * Constructor.
 	 *
 	 * @since 1.0.0
+	 * @param Logger $logger Logger instance.
 	 */
-	public function __construct() {
-		$this->database = new Database();
+	public function __construct( Logger $logger ) {
+		$this->logger = $logger;
+		global $wpdb;
+		$this->table_name = $wpdb->prefix . 'flux_media_conversions';
 	}
 
 	/**
-	 * Record a successful conversion.
+	 * Record a conversion for an attachment.
 	 *
 	 * @since 1.0.0
 	 * @param int    $attachment_id WordPress attachment ID.
-	 * @param string $original_path Original file path.
-	 * @param string $converted_path Converted file path.
-	 * @param string $format Target format (webp, avif, av1, webm).
-	 * @param float  $size_reduction Size reduction percentage.
-	 * @param int    $processing_time Processing time in seconds.
+	 * @param string $file_type File type (webp, avif, av1, webm).
 	 * @return bool True on success, false on failure.
 	 */
-	public function record_success( $attachment_id, $original_path, $converted_path, $format, $size_reduction, $processing_time ) {
+	public function record_conversion( $attachment_id, $file_type ) {
 		global $wpdb;
 
-		$table_name = $this->database->get_table_name( 'conversions' );
+		// Validate inputs
+		if ( ! $attachment_id || ! $file_type ) {
+			return false;
+		}
 
-		$result = $wpdb->insert(
-			$table_name,
-			[
-				'attachment_id' => $attachment_id,
-				'original_path' => $original_path,
-				'converted_path' => $converted_path,
-				'format' => $format,
-				'status' => 'success',
-				'size_reduction' => $size_reduction,
-				'processing_time' => $processing_time,
-				'created_at' => current_time( 'mysql' ),
-			],
-			[
-				'%d',
-				'%s',
-				'%s',
-				'%s',
-				'%s',
-				'%f',
-				'%d',
-				'%s',
-			]
-		);
+		// Use INSERT ... ON DUPLICATE KEY UPDATE for atomic operation
+		$result = $wpdb->query( $wpdb->prepare(
+			"INSERT INTO {$this->table_name} (attachment_id, file_type, converted_at) 
+			 VALUES (%d, %s, %s) 
+			 ON DUPLICATE KEY UPDATE converted_at = VALUES(converted_at)",
+			$attachment_id,
+			$file_type,
+			current_time( 'mysql' )
+		) );
 
-		return false !== $result;
+		return $result !== false;
 	}
 
 	/**
-	 * Record a failed conversion.
+	 * Get all conversions for an attachment.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id WordPress attachment ID.
+	 * @return array Array of conversion records.
+	 */
+	public function get_attachment_conversions( $attachment_id ) {
+		global $wpdb;
+
+		if ( ! $attachment_id ) {
+			return [];
+		}
+
+		$results = $wpdb->get_results( $wpdb->prepare(
+			"SELECT file_type, converted_at FROM {$this->table_name} WHERE attachment_id = %d ORDER BY converted_at DESC",
+			$attachment_id
+		), ARRAY_A );
+
+		return $results ?: [];
+	}
+
+	/**
+	 * Check if an attachment has been converted to a specific file type.
 	 *
 	 * @since 1.0.0
 	 * @param int    $attachment_id WordPress attachment ID.
-	 * @param string $original_path Original file path.
-	 * @param string $format Target format (webp, avif, av1, webm).
-	 * @param string $error_message Error message.
-	 * @return bool True on success, false on failure.
+	 * @param string $file_type File type to check.
+	 * @return bool True if converted, false otherwise.
 	 */
-	public function record_failure( $attachment_id, $original_path, $format, $error_message ) {
+	public function has_conversion( $attachment_id, $file_type ) {
 		global $wpdb;
 
-		$table_name = $this->database->get_table_name( 'conversions' );
+		if ( ! $attachment_id || ! $file_type ) {
+			return false;
+		}
 
-		$result = $wpdb->insert(
-			$table_name,
-			[
-				'attachment_id' => $attachment_id,
-				'original_path' => $original_path,
-				'converted_path' => '',
-				'format' => $format,
-				'status' => 'failed',
-				'size_reduction' => 0.0,
-				'processing_time' => 0,
-				'error_message' => $error_message,
-				'created_at' => current_time( 'mysql' ),
-			],
-			[
-				'%d',
-				'%s',
-				'%s',
-				'%s',
-				'%s',
-				'%f',
-				'%d',
-				'%s',
-				'%s',
-			]
+		$count = $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$this->table_name} WHERE attachment_id = %d AND file_type = %s",
+			$attachment_id,
+			$file_type
+		) );
+
+		return (int) $count > 0;
+	}
+
+	/**
+	 * Get all file types that an attachment has been converted to.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id WordPress attachment ID.
+	 * @return array Array of file types.
+	 */
+	public function get_converted_types( $attachment_id ) {
+		global $wpdb;
+
+		if ( ! $attachment_id ) {
+			return [];
+		}
+
+		$results = $wpdb->get_col( $wpdb->prepare(
+			"SELECT file_type FROM {$this->table_name} WHERE attachment_id = %d",
+			$attachment_id
+		) );
+
+		return $results ?: [];
+	}
+
+	/**
+	 * Delete all conversion records for an attachment.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id WordPress attachment ID.
+	 * @return bool True on success, false on failure.
+	 */
+	public function delete_attachment_conversions( $attachment_id ) {
+		global $wpdb;
+
+		if ( ! $attachment_id ) {
+			return false;
+		}
+
+		$result = $wpdb->delete(
+			$this->table_name,
+			[ 'attachment_id' => $attachment_id ],
+			[ '%d' ]
 		);
 
-		return false !== $result;
+		return $result !== false;
 	}
 
 	/**
 	 * Get conversion statistics.
 	 *
 	 * @since 1.0.0
-	 * @param array $filters Optional filters.
-	 * @return array Conversion statistics.
+	 * @return array Statistics array.
 	 */
-	public function get_statistics( $filters = [] ) {
+	public function get_conversion_stats() {
 		global $wpdb;
 
-		$table_name = $this->database->get_table_name( 'conversions' );
-		$where_clause = '1=1';
-		$where_values = [];
+		$stats = [];
 
-		// Apply filters.
-		if ( ! empty( $filters['format'] ) ) {
-			$where_clause .= ' AND format = %s';
-			$where_values[] = $filters['format'];
-		}
+		// Total conversions
+		$stats['total_conversions'] = $wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name}" );
 
-		if ( ! empty( $filters['status'] ) ) {
-			$where_clause .= ' AND status = %s';
-			$where_values[] = $filters['status'];
-		}
-
-		if ( ! empty( $filters['date_from'] ) ) {
-			$where_clause .= ' AND created_at >= %s';
-			$where_values[] = $filters['date_from'];
-		}
-
-		if ( ! empty( $filters['date_to'] ) ) {
-			$where_clause .= ' AND created_at <= %s';
-			$where_values[] = $filters['date_to'];
-		}
-
-		// Get total conversions.
-		$total_query = "SELECT COUNT(*) FROM {$table_name} WHERE {$where_clause}";
-		if ( ! empty( $where_values ) ) {
-			$total_query = $wpdb->prepare( $total_query, $where_values );
-		}
-		$total_conversions = (int) $wpdb->get_var( $total_query );
-
-		// Get successful conversions.
-		$success_query = "SELECT COUNT(*) FROM {$table_name} WHERE {$where_clause} AND status = 'success'";
-		if ( ! empty( $where_values ) ) {
-			$success_query = $wpdb->prepare( $success_query, $where_values );
-		}
-		$successful_conversions = (int) $wpdb->get_var( $success_query );
-
-		// Get failed conversions.
-		$failed_conversions = $total_conversions - $successful_conversions;
-
-		// Get average size reduction.
-		$avg_reduction_query = "SELECT AVG(size_reduction) FROM {$table_name} WHERE {$where_clause} AND status = 'success'";
-		if ( ! empty( $where_values ) ) {
-			$avg_reduction_query = $wpdb->prepare( $avg_reduction_query, $where_values );
-		}
-		$average_size_reduction = (float) $wpdb->get_var( $avg_reduction_query );
-
-		// Get total space saved.
-		$space_saved_query = "SELECT SUM(size_reduction) FROM {$table_name} WHERE {$where_clause} AND status = 'success'";
-		if ( ! empty( $where_values ) ) {
-			$space_saved_query = $wpdb->prepare( $space_saved_query, $where_values );
-		}
-		$total_space_saved = (float) $wpdb->get_var( $space_saved_query );
-
-		// Get conversions by format.
-		$format_query = "SELECT format, COUNT(*) as count FROM {$table_name} WHERE {$where_clause} GROUP BY format";
-		if ( ! empty( $where_values ) ) {
-			$format_query = $wpdb->prepare( $format_query, $where_values );
-		}
-		$conversions_by_format = $wpdb->get_results( $format_query, ARRAY_A );
-
-		return [
-			'total_conversions' => $total_conversions,
-			'successful_conversions' => $successful_conversions,
-			'failed_conversions' => $failed_conversions,
-			'success_rate' => $total_conversions > 0 ? ( $successful_conversions / $total_conversions ) * 100 : 0,
-			'average_size_reduction' => $average_size_reduction,
-			'total_space_saved' => $total_space_saved,
-			'conversions_by_format' => $conversions_by_format,
-		];
-	}
-
-	/**
-	 * Get recent conversions.
-	 *
-	 * @since 1.0.0
-	 * @param int $limit Number of records to retrieve.
-	 * @return array Recent conversion records.
-	 */
-	public function get_recent_conversions( $limit = 10 ) {
-		global $wpdb;
-
-		$table_name = $this->database->get_table_name( 'conversions' );
-
-		$query = $wpdb->prepare(
-			"SELECT * FROM {$table_name} ORDER BY created_at DESC LIMIT %d",
-			$limit
+		// Conversions by file type
+		$type_stats = $wpdb->get_results(
+			"SELECT file_type, COUNT(*) as count FROM {$this->table_name} GROUP BY file_type",
+			ARRAY_A
 		);
 
-		$results = $wpdb->get_results( $query, ARRAY_A );
+		$stats['by_type'] = [];
+		foreach ( $type_stats as $stat ) {
+			$stats['by_type'][ $stat['file_type'] ] = (int) $stat['count'];
+		}
 
-		return array_map( function( $row ) {
-			return new ConversionRecord( $row );
-		}, $results );
-	}
+		// Recent conversions (last 30 days)
+		$stats['recent_conversions'] = $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$this->table_name} WHERE converted_at >= %s",
+			date( 'Y-m-d H:i:s', strtotime( '-30 days' ) )
+		) );
 
-	/**
-	 * Clean up old conversion records.
-	 *
-	 * @since 1.0.0
-	 * @param int $days Number of days to keep records.
-	 * @return int Number of records deleted.
-	 */
-	public function cleanup_old_records( $days = 30 ) {
-		global $wpdb;
-
-		$table_name = $this->database->get_table_name( 'conversions' );
-		$cutoff_date = date( 'Y-m-d H:i:s', strtotime( "-{$days} days" ) );
-
-		$deleted = $wpdb->query(
-			$wpdb->prepare(
-				"DELETE FROM {$table_name} WHERE created_at < %s",
-				$cutoff_date
-			)
-		);
-
-		return (int) $deleted;
+		return $stats;
 	}
 }

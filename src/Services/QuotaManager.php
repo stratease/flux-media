@@ -9,7 +9,7 @@
 namespace FluxMedia\Services;
 
 use FluxMedia\Core\Database;
-use FluxMedia\Core\Options;
+use FluxMedia\Utils\Logger;
 
 /**
  * Service for managing conversion quotas in freemium model.
@@ -38,11 +38,22 @@ class QuotaManager {
 	private $database;
 
 	/**
+	 * Logger instance.
+	 *
+	 * @since 1.0.0
+	 * @var Logger
+	 */
+	private $logger;
+
+
+	/**
 	 * Constructor.
 	 *
 	 * @since 1.0.0
+	 * @param Logger $logger Logger instance.
 	 */
-	public function __construct() {
+	public function __construct( Logger $logger ) {
+		$this->logger = $logger;
 		$this->database = new Database();
 	}
 

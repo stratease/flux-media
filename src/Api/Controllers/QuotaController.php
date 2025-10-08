@@ -9,6 +9,7 @@
 namespace FluxMedia\Api\Controllers;
 
 use FluxMedia\Services\QuotaManager;
+use FluxMedia\Utils\Logger;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
@@ -51,7 +52,8 @@ class QuotaController extends BaseController {
 	 */
 	public function get_quota_progress( WP_REST_Request $request ) {
 		try {
-			$quota_manager = new QuotaManager();
+			$logger = new Logger();
+			$quota_manager = new QuotaManager( $logger );
 			$progress = $quota_manager->get_quota_progress();
 
 			return $this->create_response( $progress, 'Quota progress retrieved successfully' );
@@ -73,7 +75,8 @@ class QuotaController extends BaseController {
 	 */
 	public function get_plan_info( WP_REST_Request $request ) {
 		try {
-			$quota_manager = new QuotaManager();
+			$logger = new Logger();
+			$quota_manager = new QuotaManager( $logger );
 			$plan_info = $quota_manager->get_plan_info();
 
 			return $this->create_response( $plan_info, 'Plan information retrieved successfully' );

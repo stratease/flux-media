@@ -57,7 +57,7 @@ class OptionsController extends BaseController {
 	 */
 	public function get_options( WP_REST_Request $request ) {
 		try {
-			$options = \FluxMedia\Core\Options::get_all();
+			$options = \FluxMedia\Core\Settings::get_all();
 			return $this->create_response( $options, 'Options retrieved successfully' );
 		} catch ( \Exception $e ) {
 			return $this->create_error_response( 
@@ -89,7 +89,7 @@ class OptionsController extends BaseController {
 			// Validate and sanitize options
 			$sanitized_options = $this->sanitize_options( $options );
 
-			$result = \FluxMedia\Core\Options::update( $sanitized_options );
+			$result = \FluxMedia\Core\Settings::update( $sanitized_options );
 
 			if ( $result ) {
 				return $this->create_response( [ 'success' => true ], 'Options updated successfully' );

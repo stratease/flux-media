@@ -9,7 +9,7 @@
 namespace FluxMedia\Processors;
 
 use FluxMedia\Interfaces\VideoProcessorInterface;
-use FluxMedia\Utils\Logger;
+use FluxMedia\Interfaces\LoggerInterface;
 use FFMpeg\FFMpeg;
 use FFMpeg\FFProbe;
 use FFMpeg\Format\Video\WebM;
@@ -28,7 +28,7 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * Logger instance.
 	 *
 	 * @since 1.0.0
-	 * @var Logger
+	 * @var LoggerInterface
 	 */
 	private $logger;
 
@@ -52,9 +52,9 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	 * Constructor.
 	 *
 	 * @since 1.0.0
-	 * @param Logger $logger Logger instance.
+	 * @param LoggerInterface $logger Logger instance.
 	 */
-	public function __construct( Logger $logger ) {
+	public function __construct( LoggerInterface $logger ) {
 		$this->logger = $logger;
 		$this->initialize_ffmpeg();
 	}

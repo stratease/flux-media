@@ -9,7 +9,7 @@
 namespace FluxMedia\Processors;
 
 use FluxMedia\Interfaces\ImageProcessorInterface;
-use FluxMedia\Utils\Logger;
+use FluxMedia\Interfaces\LoggerInterface;
 
 /**
  * GD-based image processor with WebP support.
@@ -22,7 +22,7 @@ class GDProcessor implements ImageProcessorInterface {
 	 * Logger instance.
 	 *
 	 * @since 1.0.0
-	 * @var Logger
+	 * @var LoggerInterface
 	 */
 	private $logger;
 
@@ -30,9 +30,9 @@ class GDProcessor implements ImageProcessorInterface {
 	 * Constructor.
 	 *
 	 * @since 1.0.0
-	 * @param Logger $logger Logger instance.
+	 * @param LoggerInterface $logger Logger instance.
 	 */
-	public function __construct( Logger $logger ) {
+	public function __construct( LoggerInterface $logger ) {
 		$this->logger = $logger;
 	}
 
@@ -78,7 +78,7 @@ class GDProcessor implements ImageProcessorInterface {
 			return false;
 		}
 
-		$quality = $options['quality'] ?? 85;
+		$quality = $options['quality'];
 		$result = imagewebp( $image, $destination_path, $quality );
 
 		// Clean up memory.
@@ -112,7 +112,7 @@ class GDProcessor implements ImageProcessorInterface {
 			return false;
 		}
 
-		$quality = $options['quality'] ?? 80;
+		$quality = $options['quality'];
 		$result = imageavif( $image, $destination_path, $quality );
 
 		// Clean up memory.

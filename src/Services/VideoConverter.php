@@ -8,12 +8,10 @@
 
 namespace FluxMedia\Services;
 
-use FluxMedia\Utils\Logger;
-use FluxMedia\Utils\StructuredLogger;
+use FluxMedia\Interfaces\LoggerInterface;
 use FluxMedia\Interfaces\Converter;
 use FluxMedia\Interfaces\VideoProcessorInterface;
 use FluxMedia\Processors\FFmpegProcessor;
-use FluxMedia\Services\QuotaManager;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Process\Exception\ProcessFailedException;
 
@@ -28,17 +26,10 @@ class VideoConverter implements Converter {
      * Logger instance.
      *
      * @since 1.0.0
-     * @var Logger
+     * @var LoggerInterface
      */
     private $logger;
 
-    /**
-     * Structured logger instance.
-     *
-     * @since 1.0.0
-     * @var StructuredLogger
-     */
-    private $structured_logger;
 
     /**
      * Video processor instance.
@@ -48,13 +39,6 @@ class VideoConverter implements Converter {
      */
     private $processor;
 
-    /**
-     * Quota manager instance.
-     *
-     * @since 1.0.0
-     * @var QuotaManager
-     */
-    private $quota_manager;
 
     /**
      * Supported video formats.
@@ -108,12 +92,10 @@ class VideoConverter implements Converter {
      * Constructor.
      *
      * @since 1.0.0
-     * @param Logger $logger Logger instance.
+     * @param LoggerInterface $logger Logger instance.
      */
-    public function __construct( Logger $logger, QuotaManager $quota_manager ) {
+    public function __construct( LoggerInterface $logger ) {
         $this->logger = $logger;
-        $this->structured_logger = new StructuredLogger( $logger );
-        $this->quota_manager = $quota_manager;
         $this->processor = $this->get_available_processor();
     }
 
@@ -126,13 +108,13 @@ class VideoConverter implements Converter {
     private function get_available_processor() {
         // Check if PHP-FFmpeg library is available
         if ( ! class_exists( 'FFMpeg\FFMpeg' ) ) {
-            $this->structured_logger->log_video_processor_unavailable( 'PHP-FFmpeg library not found' );
+            $this->logger->log_processor_unavailable( 'PHP-FFmpeg', 'PHP-FFmpeg library not found' );
             return null;
         }
 
         // Check if FFmpeg binary is available
         if ( ! $this->is_ffmpeg_available() ) {
-            $this->structured_logger->log_video_processor_unavailable( 'FFmpeg binary not found or not executable' );
+            $this->logger->log_processor_unavailable( 'FFmpeg', 'FFmpeg binary not found or not executable' );
             return null;
         }
 
@@ -152,16 +134,13 @@ class VideoConverter implements Converter {
             }
 
             if ( ! empty( $supported_formats ) ) {
-                $this->structured_logger->log_operation_success(
-                    'Video processor initialization',
-                    'FFmpeg with ' . implode( ' and ', $supported_formats ) . ' support detected'
-                );
+                $this->logger->log_operation( 'info', 'video_processor_initialization', 'FFmpeg with ' . implode( ' and ', $supported_formats ) . ' support detected', ['component' => 'video_processor'] );
                 return $processor;
             } else {
-                $this->structured_logger->log_video_format_unsupported( 'All', 'No supported video formats available' );
+                $this->logger->log_format_unsupported( 'FFmpeg', 'All', 'No supported video formats available' );
             }
         } else {
-            $this->structured_logger->log_video_processor_unavailable( 'FFmpeg processor initialization failed' );
+            $this->logger->log_processor_unavailable( 'FFmpeg', 'FFmpeg processor initialization failed' );
         }
 
         return null;
@@ -257,31 +236,24 @@ class VideoConverter implements Converter {
      */
     public function convert_to_av1( $source_path, $destination_path, $options = [] ) {
         if ( ! $this->processor ) {
-            $this->structured_logger->log_video_processor_unavailable( 'No video processor available for AV1 conversion' );
+            $this->logger->log_processor_unavailable( 'Video', 'No video processor available for AV1 conversion' );
             return false;
         }
 
-        $default_options = [
-            'crf' => 28,
-            'preset' => 'medium',
-            'cpu_used' => 4,
-            'threads' => 0, // Auto-detect.
-        ];
-
-        $options = array_merge( $default_options, $options );
+        // Use options as provided by caller
 
         try {
             $result = $this->processor->convert_to_av1( $source_path, $destination_path, $options );
 
             if ( $result ) {
-                $this->structured_logger->log_operation_success( 'Video conversion to AV1', "Successfully converted: {$source_path}" );
+                $this->logger->log_conversion( 'info', $source_path, 'AV1', "Successfully converted: {$source_path}" );
             } else {
-                $this->structured_logger->log_video_conversion_failed( $source_path, 'AV1', 'Conversion returned false' );
+                $this->logger->log_conversion( 'error', $source_path, 'AV1', 'Conversion returned false' );
             }
 
             return $result;
         } catch ( \Exception $e ) {
-            $this->structured_logger->log_video_conversion_failed( $source_path, 'AV1', $e->getMessage() );
+            $this->logger->log_conversion( 'error', $source_path, 'AV1', $e->getMessage() );
             return false;
         }
     }
@@ -297,30 +269,24 @@ class VideoConverter implements Converter {
      */
     public function convert_to_webm( $source_path, $destination_path, $options = [] ) {
         if ( ! $this->processor ) {
-            $this->structured_logger->log_video_processor_unavailable( 'No video processor available for WebM conversion' );
+            $this->logger->log_processor_unavailable( 'Video', 'No video processor available for WebM conversion' );
             return false;
         }
 
-        $default_options = [
-            'crf' => 30,
-            'preset' => 'medium',
-            'threads' => 0, // Auto-detect.
-        ];
-
-        $options = array_merge( $default_options, $options );
+        // Use options as provided by caller
 
         try {
             $result = $this->processor->convert_to_webm( $source_path, $destination_path, $options );
 
             if ( $result ) {
-                $this->structured_logger->log_operation_success( 'Video conversion to WebM', "Successfully converted: {$source_path}" );
+                $this->logger->log_conversion( 'info', $source_path, 'WebM', "Successfully converted: {$source_path}" );
             } else {
-                $this->structured_logger->log_video_conversion_failed( $source_path, 'WebM', 'Conversion returned false' );
+                $this->logger->log_conversion( 'error', $source_path, 'WebM', 'Conversion returned false' );
             }
 
             return $result;
         } catch ( \Exception $e ) {
-            $this->structured_logger->log_video_conversion_failed( $source_path, 'WebM', $e->getMessage() );
+            $this->logger->log_conversion( 'error', $source_path, 'WebM', $e->getMessage() );
             return false;
         }
     }
@@ -333,8 +299,9 @@ class VideoConverter implements Converter {
      * @return bool True if supported, false otherwise.
      */
     public function is_supported_video( $file_path ) {
-        $mime_type = wp_check_filetype( $file_path )['type'];
-        return in_array( $mime_type, $this->supported_formats, true );
+        $extension = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+        $supported_extensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'ogg'];
+        return in_array( $extension, $supported_extensions, true );
     }
 
     /**
@@ -392,137 +359,61 @@ class VideoConverter implements Converter {
     }
 
     /**
-     * Process video on upload - convert to AV1/WebM while retaining original.
+     * Process video file - convert to multiple formats.
      *
      * @since 1.0.0
-     * @param int $attachment_id WordPress attachment ID.
+     * @param string $source_path Source video file path.
+     * @param array  $destination_paths Array of format => destination_path mappings.
+     * @param array  $settings Conversion settings.
      * @return array Conversion results.
      */
-    public function process_uploaded_video( $attachment_id ) {
+    public function process_video( $source_path, $destination_paths, $settings = [] ) {
         $results = [
             'success' => false,
             'converted_formats' => [],
+            'converted_files' => [],
             'errors' => [],
         ];
 
-        // Get attachment file path
-        $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! file_exists( $file_path ) ) {
-            $results['errors'][] = 'Attachment file not found';
+        // Validate source file
+        if ( ! file_exists( $source_path ) ) {
+            $results['errors'][] = 'Source file not found';
             return $results;
         }
 
         // Check if video is supported
-        if ( ! $this->is_supported_video( $file_path ) ) {
+        if ( ! $this->is_supported_video( $source_path ) ) {
             $results['errors'][] = 'Unsupported video format';
             return $results;
         }
 
-        // Get upload directory info
-        $upload_dir = wp_upload_dir();
-        $file_info = pathinfo( $file_path );
-        $file_dir = $file_info['dirname'];
-        $file_name = $file_info['filename'];
-
-        // Get plugin options
-        $options = get_option( 'flux_media_options', [] );
-        $video_formats = $options['video_formats'] ?? ['av1', 'webm'];
-        $av1_crf = $options['video_av1_crf'] ?? 28;
-        $webm_crf = $options['video_webm_crf'] ?? 30;
-
-        // Check if auto-conversion is enabled
-        if ( ! ( $options['video_auto_convert'] ?? true ) ) {
-            $results['errors'][] = 'Auto-conversion is disabled';
-            return $results;
-        }
-
-        // Create destination paths for all requested formats
-        $destination_paths = [];
-        foreach ( $video_formats as $format ) {
-            $destination_paths[ $format ] = $file_dir . '/' . $file_name . '.' . $format;
-        }
+        // Use settings as provided by caller
 
         // Process each requested format
-        foreach ( $video_formats as $format ) {
+        foreach ( $destination_paths as $format => $destination_path ) {
             $conversion_options = [];
 
             $success = false;
-            if ( 'av1' === $format ) {
-                $conversion_options = ['crf' => $av1_crf];
-                $success = $this->convert_to_av1( $file_path, $destination_paths[ $format ], $conversion_options );
-            } elseif ( 'webm' === $format ) {
-                $conversion_options = ['crf' => $webm_crf];
-                $success = $this->convert_to_webm( $file_path, $destination_paths[ $format ], $conversion_options );
+            if ( Converter::FORMAT_AV1 === $format ) {
+                $conversion_options = ['crf' => $settings['video_av1_crf']];
+                $success = $this->convert_to_av1( $source_path, $destination_path, $conversion_options );
+            } elseif ( Converter::FORMAT_WEBM === $format ) {
+                $conversion_options = ['crf' => $settings['video_webm_crf']];
+                $success = $this->convert_to_webm( $source_path, $destination_path, $conversion_options );
             }
 
             if ( $success ) {
                 $results['converted_formats'][] = $format;
+                $results['converted_files'][ $format ] = $destination_path;
             }
         }
 
-		// Update results
-		$results['success'] = ! empty( $results['converted_formats'] );
-
-		// Store conversion metadata and track quota usage
-		if ( $results['success'] ) {
-			// Record quota usage for each successful conversion
-			$converted_count = count( $results['converted_formats'] );
-			for ( $i = 0; $i < $converted_count; $i++ ) {
-				$this->quota_manager->record_usage( 'video' );
-			}
-			
-			update_post_meta( $attachment_id, '_flux_media_converted_formats', $results['converted_formats'] );
-			update_post_meta( $attachment_id, '_flux_media_conversion_date', current_time( 'mysql' ) );
-			
-			// Store converted file paths for later reference (reuse the same paths)
-			$converted_files = [];
-			foreach ( $results['converted_formats'] as $format ) {
-				$converted_files[ $format ] = $destination_paths[ $format ];
-			}
-			update_post_meta( $attachment_id, '_flux_media_converted_files', $converted_files );
-			
-			// Log quota usage
-			$this->logger->info( "Video conversion quota: {$converted_count} videos used for attachment {$attachment_id}" );
-		}
+        // Update results
+        $results['success'] = ! empty( $results['converted_formats'] );
 
         return $results;
     }
 
-    /**
-     * Get converted file paths for an attachment.
-     *
-     * @since 1.0.0
-     * @param int $attachment_id WordPress attachment ID.
-     * @return array Array of format => file_path mappings.
-     */
-    public function get_converted_files( $attachment_id ) {
-        return get_post_meta( $attachment_id, '_flux_media_converted_files', true ) ?: [];
-    }
-
-    /**
-     * Get converted file path for a specific format.
-     *
-     * @since 1.0.0
-     * @param int    $attachment_id WordPress attachment ID.
-     * @param string $format Target format (av1, webm).
-     * @return string|null File path or null if not found.
-     */
-    public function get_converted_file_path( $attachment_id, $format ) {
-        $converted_files = $this->get_converted_files( $attachment_id );
-        return $converted_files[ $format ] ?? null;
-    }
-
-    /**
-     * Check if attachment has converted files.
-     *
-     * @since 1.0.0
-     * @param int $attachment_id WordPress attachment ID.
-     * @return bool True if converted files exist, false otherwise.
-     */
-    public function has_converted_files( $attachment_id ) {
-        $converted_files = $this->get_converted_files( $attachment_id );
-        return ! empty( $converted_files );
-    }
 
     // ===== Converter Interface Implementation =====
 
@@ -731,9 +622,9 @@ class VideoConverter implements Converter {
         $extension = strtolower( pathinfo( $this->destination_path, PATHINFO_EXTENSION ) );
         
         switch ( $extension ) {
-            case 'av1':
+            case Converter::FORMAT_AV1:
                 return Converter::FORMAT_AV1;
-            case 'webm':
+            case Converter::FORMAT_WEBM:
                 return Converter::FORMAT_WEBM;
             default:
                 return null;

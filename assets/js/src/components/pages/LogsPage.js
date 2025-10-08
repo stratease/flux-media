@@ -21,6 +21,9 @@ import {
   Skeleton,
   IconButton,
   Tooltip,
+  Switch,
+  FormControlLabel,
+  Divider,
 } from '@mui/material';
 import {
   Refresh,
@@ -30,6 +33,8 @@ import {
 import { __ } from '@wordpress/i18n';
 import { useQuery } from '@tanstack/react-query';
 import { apiService } from '@flux-media/services/api';
+import { useAutoSaveForm } from '@flux-media/hooks/useAutoSaveForm';
+import { AutoSaveStatus } from '@flux-media/contexts/AutoSaveContext';
 
 /**
  * Logs page component with pagination and filtering
@@ -39,18 +44,50 @@ const LogsPage = () => {
   const [perPage, setPerPage] = useState(20);
   const [level, setLevel] = useState('');
   const [search, setSearch] = useState('');
+  const [enableLogging, setEnableLogging] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Fetch logs with React Query
+  // Auto-save hook for logging setting
+  const { debouncedSave } = useAutoSaveForm('logs', { enable_logging: enableLogging });
+
+  // Load initial logging setting
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await apiService.getOptions();
+        if (response && typeof response === 'object') {
+          setEnableLogging(response.enable_logging || false);
+        }
+      } catch (err) {
+        console.error('Failed to load logging setting:', err);
+        setError(__('Failed to load logging setting', 'flux-media'));
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  // Fetch logs with React Query (only when logging is enabled)
   const {
     data: logsData,
     isLoading,
-    error,
+    error: logsError,
     refetch,
   } = useQuery({
     queryKey: ['logs', page, perPage, level, search],
     queryFn: () => apiService.getLogs({ page, per_page: perPage, level, search }),
     keepPreviousData: true,
+    enabled: enableLogging, // Only fetch when logging is enabled
   });
+
+  const handleLoggingToggle = (event) => {
+    const newValue = event.target.checked;
+    setEnableLogging(newValue);
+    setError(null);
+    
+    // Trigger auto-save
+    debouncedSave({ enable_logging: newValue });
+  };
 
   const handlePageChange = (event, newPage) => {
     setPage(newPage);
@@ -100,7 +137,7 @@ const LogsPage = () => {
   if (error) {
     return (
       <Alert severity="error" sx={{ mb: 3 }}>
-        {__('Error loading logs:', 'flux-media')} {error?.message || __('Unknown error occurred', 'flux-media')}
+        {error}
       </Alert>
     );
   }
@@ -117,13 +154,68 @@ const LogsPage = () => {
           </Typography>
         </Grid>
         <Grid item>
-          <Tooltip title={__('Refresh logs', 'flux-media')}>
-            <IconButton onClick={handleRefresh} disabled={isLoading}>
-              <Refresh />
-            </IconButton>
-          </Tooltip>
+          <AutoSaveStatus saveKey="logs" />
         </Grid>
       </Grid>
+
+      {/* Logging Toggle */}
+      <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+        <Grid container justifyContent="space-between" alignItems="center">
+          <Grid item>
+            <Typography variant="h6" gutterBottom>
+              {__('Logging Settings', 'flux-media')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {__('Enable or disable system logging. When disabled, no new logs will be created and existing logs will not be displayed.', 'flux-media')}
+            </Typography>
+          </Grid>
+          <Grid item>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={enableLogging}
+                  onChange={handleLoggingToggle}
+                  color="primary"
+                />
+              }
+              label={__('Enable Logging', 'flux-media')}
+            />
+          </Grid>
+        </Grid>
+      </Box>
+
+      {/* Show message when logging is disabled */}
+      {!enableLogging && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            {__('Logging is currently disabled. Enable logging above to view system logs and start recording new log entries.', 'flux-media')}
+          </Typography>
+        </Alert>
+      )}
+
+      {/* Logs content - only show when logging is enabled */}
+      {enableLogging && (
+        <>
+          <Grid container justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+            <Grid item>
+              <Typography variant="h6" gutterBottom>
+                {__('Log Entries', 'flux-media')}
+              </Typography>
+            </Grid>
+            <Grid item>
+              <Tooltip title={__('Refresh logs', 'flux-media')}>
+                <IconButton onClick={handleRefresh} disabled={isLoading}>
+                  <Refresh />
+                </IconButton>
+              </Tooltip>
+            </Grid>
+          </Grid>
+
+          {logsError && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              {__('Error loading logs:', 'flux-media')} {logsError?.message || __('Unknown error occurred', 'flux-media')}
+            </Alert>
+          )}
 
       {/* Filters */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -270,13 +362,15 @@ const LogsPage = () => {
         </Box>
       )}
 
-      {/* Pagination Info */}
-      {logsData?.pagination && (
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            {__('Showing', 'flux-media')} {((page - 1) * perPage) + 1} - {Math.min(page * perPage, logsData.pagination.total)} {__('of', 'flux-media')} {logsData.pagination.total} {__('logs', 'flux-media')}
-          </Typography>
-        </Box>
+          {/* Pagination Info */}
+          {logsData?.pagination && (
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                {__('Showing', 'flux-media')} {((page - 1) * perPage) + 1} - {Math.min(page * perPage, logsData.pagination.total)} {__('of', 'flux-media')} {logsData.pagination.total} {__('logs', 'flux-media')}
+              </Typography>
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );

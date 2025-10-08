@@ -9,7 +9,9 @@
 namespace FluxMedia\Processors;
 
 use FluxMedia\Interfaces\ImageProcessorInterface;
-use FluxMedia\Utils\Logger;
+use FluxMedia\Interfaces\LoggerInterface;
+use Imagick;
+use ImagickException;
 
 /**
  * Imagick-based image processor with high-quality conversion settings.
@@ -22,7 +24,7 @@ class ImagickProcessor implements ImageProcessorInterface {
 	 * Logger instance.
 	 *
 	 * @since 1.0.0
-	 * @var Logger
+	 * @var LoggerInterface
 	 */
 	private $logger;
 
@@ -30,7 +32,7 @@ class ImagickProcessor implements ImageProcessorInterface {
 	 * Imagick instance.
 	 *
 	 * @since 1.0.0
-	 * @var \Imagick
+	 * @var Imagick
 	 */
 	private $imagick;
 
@@ -38,11 +40,11 @@ class ImagickProcessor implements ImageProcessorInterface {
 	 * Constructor.
 	 *
 	 * @since 1.0.0
-	 * @param Logger $logger Logger instance.
+	 * @param LoggerInterface $logger Logger instance.
 	 */
-	public function __construct( Logger $logger ) {
+	public function __construct( LoggerInterface $logger ) {
 		$this->logger = $logger;
-		$this->imagick = new \Imagick();
+		$this->imagick = new Imagick();
 	}
 
 	/**
@@ -80,20 +82,20 @@ class ImagickProcessor implements ImageProcessorInterface {
 		}
 
 		try {
-			$image = new \Imagick( $source_path );
+			$image = new Imagick( $source_path );
 			
-			// Set high-quality WebP options.
+			// Set optimized WebP options for better compression.
 			$image->setImageFormat( 'WEBP' );
-			$image->setImageCompressionQuality( $options['quality'] ?? 85 );
+			$image->setImageCompressionQuality( $options['quality'] );
 			
 			// Enable lossless compression if requested.
 			if ( $options['lossless'] ?? false ) {
 				$image->setOption( 'webp:lossless', 'true' );
 			} else {
-				// Use advanced WebP options for better compression.
-				$image->setOption( 'webp:method', '6' ); // Best compression method.
-				$image->setOption( 'webp:pass', '10' ); // Maximum number of entropy-analysis passes.
-				$image->setOption( 'webp:preprocessing', '2' ); // Preprocessing filter.
+				// Use optimized WebP options for better compression and smaller file sizes.
+				$image->setOption( 'webp:method', '4' ); // Balanced compression method (was 6).
+				$image->setOption( 'webp:pass', '6' ); // Fewer passes for faster/smaller files (was 10).
+				$image->setOption( 'webp:preprocessing', '1' ); // Less aggressive preprocessing (was 2).
 			}
 
 			// Strip metadata for smaller file size.
@@ -105,7 +107,7 @@ class ImagickProcessor implements ImageProcessorInterface {
 			$image->destroy();
 
 			return $result;
-		} catch ( \ImagickException $e ) {
+		} catch ( ImagickException $e ) {
 			$this->logger->error( "Imagick WebP conversion failed: {$e->getMessage()}" );
 			return false;
 		}
@@ -127,15 +129,15 @@ class ImagickProcessor implements ImageProcessorInterface {
 		}
 
 		try {
-			$image = new \Imagick( $source_path );
+			$image = new Imagick( $source_path );
 			
 			// Set high-quality AVIF options.
 			$image->setImageFormat( 'AVIF' );
-			$image->setImageCompressionQuality( $options['quality'] ?? 80 );
+			$image->setImageCompressionQuality( $options['quality'] );
 			
 			// Set AVIF-specific options for optimal quality.
-			$image->setOption( 'avif:speed', (string) ( $options['speed'] ?? 6 ) );
-			$image->setOption( 'avif:crf', (string) ( $options['quality'] ?? 80 ) );
+			$image->setOption( 'avif:speed', (string) $options['speed'] );
+			$image->setOption( 'avif:crf', (string) $options['quality'] );
 			
 			// Use advanced AVIF settings.
 			$image->setOption( 'avif:colorprim', 'bt709' ); // Color primaries.
@@ -151,7 +153,7 @@ class ImagickProcessor implements ImageProcessorInterface {
 			$image->destroy();
 
 			return $result;
-		} catch ( \ImagickException $e ) {
+		} catch ( ImagickException $e ) {
 			$this->logger->error( "Imagick AVIF conversion failed: {$e->getMessage()}" );
 			return false;
 		}
