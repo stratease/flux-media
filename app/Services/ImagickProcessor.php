@@ -149,7 +149,9 @@ class ImagickProcessor implements ImageProcessorInterface {
 			
 			// Set AVIF-specific options for optimal quality.
 			$image->setOption( 'avif:speed', (string) ( $options['speed'] ?? 0 ) );
-			$image->setOption( 'avif:crf', (string) $options['quality'] );
+			
+			// Note: avif:crf option not working with ImageMagick 6.9.11
+			// Using setImageCompressionQuality() instead
 			
 			// Use advanced AVIF settings.
 			$image->setOption( 'avif:colorprim', 'bt709' ); // Color primaries.

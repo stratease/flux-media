@@ -411,6 +411,39 @@ class ImageConverter implements Converter {
 			return $results;
 		}
 
+		// Validate destination paths and write permissions
+		foreach ( $destination_paths as $format => $destination_path ) {
+			$destination_dir = dirname( $destination_path );
+			
+			// Check if destination directory exists and is writable
+			if ( ! is_dir( $destination_dir ) ) {
+				$results['errors'][] = "Destination directory does not exist: {$destination_dir}";
+				continue;
+			}
+			
+			if ( ! is_writable( $destination_dir ) ) {
+				$results['errors'][] = "Destination directory is not writable: {$destination_dir}";
+				continue;
+			}
+			
+			// If file already exists, check if we can write to it
+			if ( file_exists( $destination_path ) ) {
+				if ( ! is_writable( $destination_path ) ) {
+					$results['errors'][] = "Destination file exists but is not writable: {$destination_path}";
+					continue;
+				}
+			}
+			
+			// Log successful validation
+			$this->logger->debug( "Destination path validated for {$format}: {$destination_path}" );
+		}
+		
+		// If any destination paths failed validation, return early
+		if ( ! empty( $results['errors'] ) ) {
+			$this->logger->error( 'Destination path validation failed: ' . implode( ', ', $results['errors'] ) );
+			return $results;
+		}
+
 		// Use settings as provided by caller
 
 		// Process based on settings

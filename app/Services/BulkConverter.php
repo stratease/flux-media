@@ -211,6 +211,7 @@ class BulkConverter {
 			'hybrid_approach' => Settings::is_hybrid_approach_enabled(),
 			'webp_quality' => Settings::get_webp_quality(),
 			'avif_quality' => Settings::get_avif_quality(),
+			'avif_speed' => Settings::get_avif_speed(),
 		];
 
 		// Create destination paths for requested formats
