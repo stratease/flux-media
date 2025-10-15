@@ -106,6 +106,18 @@ class ImagickProcessor implements ImageProcessorInterface {
 			$image->clear();
 			$image->destroy();
 
+			// Check if writeImage actually succeeded
+			if ( $result === false ) {
+				$this->logger->error( "Imagick writeImage() failed for WebP conversion to: {$destination_path}" );
+				return false;
+			}
+
+			// Verify the file was actually created
+			if ( ! file_exists( $destination_path ) ) {
+				$this->logger->error( "WebP file was not created at: {$destination_path}" );
+				return false;
+			}
+
 			return $result;
 		} catch ( ImagickException $e ) {
 			$this->logger->error( "Imagick WebP conversion failed: {$e->getMessage()}" );
@@ -151,6 +163,18 @@ class ImagickProcessor implements ImageProcessorInterface {
 			$result = $image->writeImage( $destination_path );
 			$image->clear();
 			$image->destroy();
+
+			// Check if writeImage actually succeeded
+			if ( $result === false ) {
+				$this->logger->error( "Imagick writeImage() failed for AVIF conversion to: {$destination_path}" );
+				return false;
+			}
+
+			// Verify the file was actually created
+			if ( ! file_exists( $destination_path ) ) {
+				$this->logger->error( "AVIF file was not created at: {$destination_path}" );
+				return false;
+			}
 
 			return $result;
 		} catch ( ImagickException $e ) {

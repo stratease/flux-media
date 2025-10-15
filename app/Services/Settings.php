@@ -50,10 +50,7 @@ class Settings {
 	const DEFAULT_IMAGE_AUTO_CONVERT = true;
 	const DEFAULT_VIDEO_AUTO_CONVERT = true;
 	const DEFAULT_HYBRID_APPROACH = true;
-	const DEFAULT_ASYNC_PROCESSING = true;
-	const DEFAULT_CLEANUP_TEMP_FILES = true;
-	const DEFAULT_CDN_ENABLED = false;
-	const DEFAULT_EXTERNAL_CONVERSION_ENABLED = false;
+	const DEFAULT_BULK_CONVERSION_ENABLED = false;
 
 	/**
 	 * Default other settings.
@@ -62,9 +59,6 @@ class Settings {
 	 */
 	const DEFAULT_LOG_LEVEL = 'info';
 	const DEFAULT_ENABLE_LOGGING = false;
-	const DEFAULT_MAX_FILE_SIZE = 100; // MB
-	const DEFAULT_CONVERSION_TIMEOUT = 3600; // seconds
-	const DEFAULT_LICENSE_STATUS = 'free';
 
 	/**
 	 * WordPress option name.
@@ -84,7 +78,6 @@ class Settings {
 		return [
 			// Image conversion settings.
 			'image_webp_quality' => self::DEFAULT_WEBP_QUALITY,
-			'image_webp_lossless' => false,
 			'image_avif_quality' => self::DEFAULT_AVIF_QUALITY,
 			'image_avif_speed' => self::DEFAULT_AVIF_SPEED,
 			'image_auto_convert' => self::DEFAULT_IMAGE_AUTO_CONVERT,
@@ -100,28 +93,12 @@ class Settings {
 			'video_formats' => self::DEFAULT_VIDEO_FORMATS,
 
 			// General settings.
-			'async_processing' => self::DEFAULT_ASYNC_PROCESSING,
-			'cleanup_temp_files' => self::DEFAULT_CLEANUP_TEMP_FILES,
+			'bulk_conversion_enabled' => self::DEFAULT_BULK_CONVERSION_ENABLED,
 			'log_level' => self::DEFAULT_LOG_LEVEL,
 			'enable_logging' => self::DEFAULT_ENABLE_LOGGING,
-			'max_file_size' => self::DEFAULT_MAX_FILE_SIZE,
-			'conversion_timeout' => self::DEFAULT_CONVERSION_TIMEOUT,
 
 			// License settings.
 			'license_key' => '',
-			'license_status' => self::DEFAULT_LICENSE_STATUS,
-
-			// CDN settings.
-			'cdn_enabled' => self::DEFAULT_CDN_ENABLED,
-			'cdn_provider' => '',
-			'cdn_api_key' => '',
-			'cdn_endpoint' => '',
-
-			// External conversion settings.
-			'external_conversion_enabled' => self::DEFAULT_EXTERNAL_CONVERSION_ENABLED,
-			'external_conversion_provider' => '',
-			'external_conversion_api_key' => '',
-			'external_conversion_endpoint' => '',
 		];
 	}
 
@@ -330,5 +307,15 @@ class Settings {
 	 */
 	public static function is_logging_enabled() {
 		return (bool) self::get( 'enable_logging', self::DEFAULT_ENABLE_LOGGING );
+	}
+
+	/**
+	 * Check if bulk conversion is enabled.
+	 *
+	 * @since 0.1.0
+	 * @return bool True if bulk conversion is enabled.
+	 */
+	public static function is_bulk_conversion_enabled() {
+		return (bool) self::get( 'bulk_conversion_enabled', self::DEFAULT_BULK_CONVERSION_ENABLED );
 	}
 }

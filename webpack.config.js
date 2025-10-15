@@ -21,11 +21,38 @@ module.exports = {
     rules: [
       {
         test: /\.js$/,
-        exclude: /node_modules/,
+        exclude: [
+          /node_modules/,
+          path.resolve(__dirname, 'assets/js/src/admin/attachment.js'),
+        ],
         use: {
           loader: 'babel-loader',
           options: {
             presets: ['@babel/preset-env', '@babel/preset-react'],
+            plugins: [
+              [
+                'module-resolver',
+                {
+                  root: ['./assets/js/src'],
+                  alias: {
+                    '@flux-media': './assets/js/src',
+                  },
+                },
+              ],
+            ],
+          },
+        },
+      },
+      {
+        test: /\.js$/,
+        exclude: /node_modules/,
+        include: [
+          path.resolve(__dirname, 'assets/js/src/admin/attachment.js'),
+        ],
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-env'],
             plugins: [
               [
                 'module-resolver',

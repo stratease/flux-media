@@ -2,6 +2,8 @@
 
 Advanced image and video optimization plugin for WordPress. Converts images to WebP/AVIF and videos to AV1/WebM with high-quality settings, featuring a modern React-based admin interface with hash routing and comprehensive API integration.
 
+**Source Code**: [https://github.com/stratease/flux-media](https://github.com/stratease/flux-media)
+
 ## 🚀 Features
 
 ### Image Optimization
@@ -198,24 +200,40 @@ flux-media/
 
 ## 🔧 Installation
 
-### 1. Download and Install
-1. Download the plugin files
+### From Source (Development)
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/stratease/flux-media.git
+   cd flux-media
+   ```
+
+2. **Install PHP dependencies**:
+   ```bash
+   composer install
+   ```
+
+3. **Install Node.js dependencies**:
+   ```bash
+   npm install
+   ```
+
+4. **Build React frontend**:
+   ```bash
+   npm run build
+   ```
+
+5. **Install in WordPress**:
+   - Copy the entire `flux-media` directory to `/wp-content/plugins/`
+   - Activate the plugin through the WordPress admin
+
+### From WordPress.org (Production)
+
+1. Download from the WordPress plugin directory
 2. Upload to `/wp-content/plugins/flux-media/`
 3. Activate the plugin through the WordPress admin
 
-### 2. Install Dependencies
-```bash
-# Install PHP dependencies
-composer install
-
-# Install Node.js dependencies
-npm install
-
-# Build React frontend
-npm run build
-```
-
-### 3. Configure System
+### System Requirements
 1. Ensure GD or Imagick is installed with WebP/AVIF support
 2. Install FFmpeg with required codecs
 3. Configure PHP memory limits (minimum 256MB)
@@ -854,7 +872,11 @@ src/
 
 ## 📄 License
 
-GPL v2 or later - See LICENSE file for details.
+GPL-2.0-or-later - See [LICENSE](LICENSE) file for details.
+
+This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 2 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 ## 🆘 Support
 

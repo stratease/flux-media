@@ -15,6 +15,7 @@ use FluxMedia\App\Services\GDProcessor;
 use FluxMedia\App\Services\ImagickProcessor;
 use FluxMedia\App\Services\FormatSupportDetector;
 use FluxMedia\App\Services\ProcessorDetector;
+use FluxMedia\App\Services\ProcessorTypes;
 
 /**
  * Image conversion service that handles WebP and AVIF conversion.
@@ -48,12 +49,12 @@ class ImageConverter implements Converter {
     private $processor_detector;
 
     /**
-     * Image processor instance.
+     * Available image processors.
      *
      * @since 0.1.0
-     * @var ImageProcessorInterface
+     * @var array
      */
-    private $processor;
+    private $available_processors = [];
 
 
     /**
@@ -111,31 +112,34 @@ class ImageConverter implements Converter {
         $this->logger = $logger;
         $this->processor_detector = new ProcessorDetector();
         $this->format_detector = new FormatSupportDetector( $this->processor_detector );
-        $this->processor = $this->get_available_processor();
+        $this->available_processors = $this->initialize_processors();
     }
 
 	/**
-	 * Get the available image processor (Imagick or GD).
+	 * Initialize available image processors.
 	 *
 	 * @since 0.1.0
-	 * @return ImageProcessorInterface|null The processor instance or null if none available.
+	 * @return array Array of processor instances keyed by type.
 	 */
-	private function get_available_processor() {
-		// Get available processors
-		$processors = $this->processor_detector->get_available_image_processors();
+	private function initialize_processors() {
+		$processors = [];
+		$available_processors = $this->processor_detector->get_available_image_processors();
 		
-		// Prefer Imagick for better quality and more features
-		if ( isset( $processors['imagick'] ) && $processors['imagick']['available'] ) {
-			return new ImagickProcessor( $this->logger );
+		// Initialize Imagick processor if available
+		if ( isset( $available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) && $available_processors[ ProcessorTypes::IMAGE_IMAGICK ]['available'] ) {
+			$processors[ ProcessorTypes::IMAGE_IMAGICK ] = new ImagickProcessor( $this->logger );
 		}
 		
-		// Fallback to GD
-		if ( isset( $processors['gd'] ) && $processors['gd']['available'] ) {
-			return new GDProcessor( $this->logger );
+		// Initialize GD processor if available
+		if ( isset( $available_processors[ ProcessorTypes::IMAGE_GD ] ) && $available_processors[ ProcessorTypes::IMAGE_GD ]['available'] ) {
+			$processors[ ProcessorTypes::IMAGE_GD ] = new GDProcessor( $this->logger );
 		}
 
-		$this->logger->error( 'No suitable image processor found. Imagick or GD with WebP support required.' );
-		return null;
+		if ( empty( $processors ) ) {
+			$this->logger->error( 'No suitable image processor found. Imagick or GD required.' );
+		}
+
+		return $processors;
 	}
 
 	/**
@@ -145,7 +149,7 @@ class ImageConverter implements Converter {
 	 * @return bool True if conversion is available, false otherwise.
 	 */
 	public function is_available() {
-		return null !== $this->processor;
+		return ! empty( $this->available_processors );
 	}
 
 	/**
@@ -155,30 +159,39 @@ class ImageConverter implements Converter {
 	 * @return array Processor information.
 	 */
 	public function get_processor_info() {
-		// Always check format support capabilities, regardless of processor availability
+		// Check format support capabilities across all processors
 		$webp_support = $this->can_convert_to_webp();
 		$avif_support = $this->can_convert_to_avif();
 		
-		// Processor is available if we can convert to at least one format
-		$available = $webp_support || $avif_support;
+		// Get the best processor for each format
+		$webp_processor = $this->processor_for_format( Converter::FORMAT_WEBP );
+		$avif_processor = $this->processor_for_format( Converter::FORMAT_AVIF );
 		
-		if ( $available && $this->processor ) {
-			$processor_info = $this->processor->get_info();
-			
-			return [
+		// Build processor information for each available processor
+		$processors = [];
+		foreach ( $this->available_processors as $type => $processor ) {
+			$processor_info = $processor->get_info();
+			$processors[ $type ] = [
 				'available' => true,
-				'type' => $processor_info['type'] ?? 'unknown',
-				'version' => $processor_info['version'] ?? 'Unknown',
-				'webp_support' => $webp_support,
-				'avif_support' => $avif_support,
+				'type' => $processor_info['type'],
+				'version' => $processor_info['version'],
+				'webp_support' => $processor_info['webp_support'] ?? false,
+				'avif_support' => $processor_info['avif_support'] ?? false,
 			];
 		}
 		
+		// Determine which processor handles each format
+		$format_processors = [
+			Converter::FORMAT_WEBP => $webp_processor ? $webp_processor->get_info()['type'] : null,
+			Converter::FORMAT_AVIF => $avif_processor ? $avif_processor->get_info()['type'] : null,
+		];
+		
 		return [
-			'available' => false,
-			'type' => 'none',
-			'webp_support' => false,
-			'avif_support' => false,
+			'available' => ! empty( $this->available_processors ),
+			'webp_support' => $webp_support,
+			'avif_support' => $avif_support,
+			'processors' => $processors,
+			'format_processors' => $format_processors,
 		];
 	}
 
@@ -189,14 +202,7 @@ class ImageConverter implements Converter {
 	 * @return bool True if WebP conversion is possible, false otherwise.
 	 */
 	private function can_convert_to_webp() {
-		// Check if processor is available
-		if ( ! $this->processor ) {
-			return false;
-		}
-		
-		// Check processor-specific WebP support
-		$processor_info = $this->processor->get_info();
-		return $processor_info['webp_support'] ?? false;
+		return $this->processor_for_format( Converter::FORMAT_WEBP ) !== null;
 	}
 
 	/**
@@ -206,14 +212,44 @@ class ImageConverter implements Converter {
 	 * @return bool True if AVIF conversion is possible, false otherwise.
 	 */
 	private function can_convert_to_avif() {
-		// Check if processor is available
-		if ( ! $this->processor ) {
-			return false;
+		return $this->processor_for_format( Converter::FORMAT_AVIF ) !== null;
+	}
+
+	/**
+	 * Get the most capable and efficient processor for a specific format.
+	 *
+	 * @since 0.1.0
+	 * @param string $format Target format constant.
+	 * @return ImageProcessorInterface|null Best processor or null if none available.
+	 */
+	private function processor_for_format( $format ) {
+		// Prefer Imagick for better quality and more features
+		if ( isset( $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
+			$imagick = $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ];
+			$processor_info = $imagick->get_info();
+			
+			if ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) {
+				return $imagick;
+			}
+			if ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) {
+				return $imagick;
+			}
 		}
 		
-		// Check processor-specific AVIF support
-		$processor_info = $this->processor->get_info();
-		return $processor_info['avif_support'] ?? false;
+		// Fallback to GD
+		if ( isset( $this->available_processors[ ProcessorTypes::IMAGE_GD ] ) ) {
+			$gd = $this->available_processors[ ProcessorTypes::IMAGE_GD ];
+			$processor_info = $gd->get_info();
+			
+			if ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) {
+				return $gd;
+			}
+			if ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) {
+				return $gd;
+			}
+		}
+
+		return null;
 	}
 
 	/**
@@ -226,13 +262,14 @@ class ImageConverter implements Converter {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_webp( $source_path, $destination_path, $options = [] ) {
-		if ( ! $this->processor ) {
+		$processor = $this->processor_for_format( Converter::FORMAT_WEBP );
+		if ( ! $processor ) {
 			$this->logger->error( 'No image processor available for WebP conversion' );
 			return false;
 		}
 
 		try {
-			$result = $this->processor->convert_to_webp( $source_path, $destination_path, $options );
+			$result = $processor->convert_to_webp( $source_path, $destination_path, $options );
 			
 			if ( ! $result ) {
 				$this->logger->error( "WebP conversion failed for: {$source_path}" );
@@ -255,13 +292,14 @@ class ImageConverter implements Converter {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_avif( $source_path, $destination_path, $options = [] ) {
-		if ( ! $this->processor ) {
+		$processor = $this->processor_for_format( Converter::FORMAT_AVIF );
+		if ( ! $processor ) {
 			$this->logger->error( 'No image processor available for AVIF conversion' );
 			return false;
 		}
 
 		try {
-			$result = $this->processor->convert_to_avif( $source_path, $destination_path, $options );
+			$result = $processor->convert_to_avif( $source_path, $destination_path, $options );
 			
 			if ( ! $result ) {
 				$this->logger->error( "AVIF conversion failed for: {$source_path}" );

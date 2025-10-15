@@ -12,6 +12,7 @@ use FluxMedia\App\Services\FormatSupportDetector;
 use FluxMedia\App\Services\ProcessorDetector;
 use FluxMedia\App\Services\ProcessorTypes;
 use FluxMedia\App\Services\QuotaManager;
+use FluxMedia\App\Services\Converter;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -140,21 +141,33 @@ class StatusController extends BaseController {
 	 */
 	private function get_image_processor_status() {
 		$available_processors = $this->processor_detector->get_available_image_processors();
+		$format_support_info = $this->format_detector->get_format_support_info();
 		
-		// Determine the best processor (prefer Imagick over GD)
-		$best_processor = null;
-		if ( isset( $available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
-			$best_processor = ProcessorTypes::IMAGE_IMAGICK;
-		} elseif ( isset( $available_processors[ ProcessorTypes::IMAGE_GD ] ) ) {
-			$best_processor = ProcessorTypes::IMAGE_GD;
+		// Build detailed processor information
+		$processors = [];
+		foreach ( $available_processors as $type => $processor_info ) {
+			$processors[ $type ] = [
+				'available' => $processor_info['available'],
+				'type' => $processor_info['type'],
+				'version' => $processor_info['version'],
+				'webp_support' => $processor_info['webp_support'] ?? false,
+				'avif_support' => $processor_info['avif_support'] ?? false,
+			];
 		}
 		
+		// Determine which processor handles each format (best available)
+		$format_processors = [
+			Converter::FORMAT_WEBP => $this->get_best_processor_for_format( Converter::FORMAT_WEBP, $available_processors ),
+			Converter::FORMAT_AVIF => $this->get_best_processor_for_format( Converter::FORMAT_AVIF, $available_processors ),
+		];
+		
 		return [
-			'available' => ! empty( $best_processor ),
-			'type' => $best_processor ?: 'none',
-			'version' => $this->get_processor_version( $best_processor ),
-			'webp_support' => $this->format_detector->supports_webp(),
-			'avif_support' => $this->format_detector->supports_avif(),
+			'available' => ! empty( $available_processors ),
+			'webp_support' => $format_support_info[ Converter::FORMAT_WEBP ]['supported'],
+			'avif_support' => $format_support_info[ Converter::FORMAT_AVIF ]['supported'],
+			'processors' => $processors,
+			'format_processors' => $format_processors,
+			'format_support_details' => $format_support_info,
 		];
 	}
 
@@ -166,42 +179,97 @@ class StatusController extends BaseController {
 	 */
 	private function get_video_processor_status() {
 		$available_processors = $this->processor_detector->get_available_video_processors();
+		$format_support_info = $this->format_detector->get_format_support_info();
 		
-		// Determine the best processor (FFmpeg is the only video processor we support)
-		$best_processor = null;
-		if ( isset( $available_processors[ ProcessorTypes::VIDEO_FFMPEG ] ) ) {
-			$best_processor = ProcessorTypes::VIDEO_FFMPEG;
+		// Build detailed processor information
+		$processors = [];
+		foreach ( $available_processors as $type => $processor_info ) {
+			$processors[ $type ] = [
+				'available' => $processor_info['available'],
+				'type' => $processor_info['type'],
+				'version' => $processor_info['version'],
+				'av1_support' => $processor_info['av1_support'] ?? false,
+				'webm_support' => $processor_info['webm_support'] ?? false,
+			];
 		}
 		
+		// Determine which processor handles each format (best available)
+		$format_processors = [
+			Converter::FORMAT_AV1 => $this->get_best_video_processor_for_format( Converter::FORMAT_AV1, $available_processors ),
+			Converter::FORMAT_WEBM => $this->get_best_video_processor_for_format( Converter::FORMAT_WEBM, $available_processors ),
+		];
+		
 		return [
-			'available' => ! empty( $best_processor ),
-			'type' => $best_processor ?: 'none',
-			'av1_support' => $this->format_detector->supports_av1(),
-			'webm_support' => $this->format_detector->supports_webm(),
+			'available' => ! empty( $available_processors ),
+			'av1_support' => $format_support_info[ Converter::FORMAT_AV1 ]['supported'],
+			'webm_support' => $format_support_info[ Converter::FORMAT_WEBM ]['supported'],
+			'processors' => $processors,
+			'format_processors' => $format_processors,
+			'format_support_details' => [
+				Converter::FORMAT_AV1 => $format_support_info[ Converter::FORMAT_AV1 ],
+				Converter::FORMAT_WEBM => $format_support_info[ Converter::FORMAT_WEBM ],
+			],
 		];
 	}
 
 	/**
-	 * Get processor version information.
+	 * Get the best processor for a specific format.
 	 *
 	 * @since 0.1.0
-	 * @param string $processor_type Processor type.
-	 * @return string Processor version.
+	 * @param string $format Target format constant.
+	 * @param array  $available_processors Available processors.
+	 * @return string|null Best processor type or null if none available.
 	 */
-	private function get_processor_version( $processor_type ) {
-		switch ( $processor_type ) {
-			case 'gd':
-				$info = gd_info();
-				return $info['GD Version'] ?? 'Unknown';
-			case 'imagick':
-				if ( class_exists( 'Imagick' ) ) {
-					$imagick = new \Imagick();
-					return $imagick->getVersion()['versionString'] ?? 'Unknown';
-				}
-				return 'Not available';
-			default:
-				return 'Not available';
+	private function get_best_processor_for_format( $format, $available_processors ) {
+		// Prefer Imagick for better quality and more features
+		if ( isset( $available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
+			$processor_info = $available_processors[ ProcessorTypes::IMAGE_IMAGICK ];
+			
+			if ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) {
+				return ProcessorTypes::IMAGE_IMAGICK;
+			}
+			if ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) {
+				return ProcessorTypes::IMAGE_IMAGICK;
+			}
 		}
+		
+		// Fallback to GD
+		if ( isset( $available_processors[ ProcessorTypes::IMAGE_GD ] ) ) {
+			$processor_info = $available_processors[ ProcessorTypes::IMAGE_GD ];
+			
+			if ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) {
+				return ProcessorTypes::IMAGE_GD;
+			}
+			if ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) {
+				return ProcessorTypes::IMAGE_GD;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get the best video processor for a specific format.
+	 *
+	 * @since 0.1.0
+	 * @param string $format Target format constant.
+	 * @param array  $available_processors Available processors.
+	 * @return string|null Best processor type or null if none available.
+	 */
+	private function get_best_video_processor_for_format( $format, $available_processors ) {
+		// FFmpeg is the only video processor we support
+		if ( isset( $available_processors[ ProcessorTypes::VIDEO_FFMPEG ] ) ) {
+			$processor_info = $available_processors[ ProcessorTypes::VIDEO_FFMPEG ];
+			
+			if ( Converter::FORMAT_AV1 === $format && ( $processor_info['av1_support'] ?? false ) ) {
+				return ProcessorTypes::VIDEO_FFMPEG;
+			}
+			if ( Converter::FORMAT_WEBM === $format && ( $processor_info['webm_support'] ?? false ) ) {
+				return ProcessorTypes::VIDEO_FFMPEG;
+			}
+		}
+
+		return null;
 	}
 
 	/**

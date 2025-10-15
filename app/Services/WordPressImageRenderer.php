@@ -235,21 +235,23 @@ class WordPressImageRenderer {
         $converted_files = get_post_meta( $post->ID, '_flux_media_converted_files', true );
         $conversion_disabled = get_post_meta( $post->ID, '_flux_media_conversion_disabled', true );
         
+        // Combine all sections under one "Flux Media" label
+        $html_content = '';
+        
+        // Add conversion status if files exist
         if ( ! empty( $converted_files ) ) {
-            // Add conversion status field
-            $form_fields['flux_media_conversion_status'] = [
-                'label' => __( 'Conversion Status', 'flux-media' ),
-                'input' => 'html',
-                'html' => $this->get_conversion_status_html( $post->ID, $converted_files ),
-            ];
-            
-            // Add conversion actions
-            $form_fields['flux_media_conversion_actions'] = [
-                'label' => __( 'Conversion Actions', 'flux-media' ),
-                'input' => 'html',
-                'html' => $this->get_conversion_actions_html( $post->ID, $conversion_disabled ),
-            ];
+            $html_content .= $this->get_conversion_status_html( $post->ID, $converted_files );
         }
+        
+        // Always add conversion actions
+        $html_content .= $this->get_conversion_actions_html( $post->ID, $conversion_disabled );
+        
+        // Single Flux Media section with all content
+        $form_fields['flux_media'] = [
+            'label' => __( 'Flux Media', 'flux-media' ),
+            'input' => 'html',
+            'html' => $html_content,
+        ];
         
         return $form_fields;
     }
@@ -411,12 +413,17 @@ class WordPressImageRenderer {
             );
         } else {
             $html .= '<div style="display: flex; gap: 8px; flex-wrap: wrap;">';
+            
+            // Check if there are converted files to determine button text
+            $converted_files = get_post_meta( $attachment_id, '_flux_media_converted_files', true );
+            $button_text = ! empty( $converted_files ) ? __( 'Re-convert', 'flux-media' ) : __( 'Convert', 'flux-media' );
+            
             $html .= sprintf(
                 '<button type="button" class="button button-primary" onclick="fluxMediaConvertAttachment(%d)" style="background: #0073aa; border-color: #0073aa; color: white; padding: 6px 12px; border-radius: 3px; cursor: pointer;">
                     %s
                 </button>',
                 $attachment_id,
-                __( 'Re-convert', 'flux-media' )
+                $button_text
             );
             
             $html .= sprintf(

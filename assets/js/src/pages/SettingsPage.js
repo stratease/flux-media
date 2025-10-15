@@ -118,6 +118,20 @@ const SettingsPage = () => {
                 label={__('Auto-convert on upload', 'flux-media')}
               />
               
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings?.bulk_conversion_enabled}
+                    disabled={isLoading}
+                    onChange={handleSettingChange('bulk_conversion_enabled')}
+                  />
+                }
+                label={__('Enable bulk conversion', 'flux-media')}
+              />
+              <Typography variant="body2" color="text.secondary" sx={{ ml: 4, mb: 1 }}>
+                {__('Automatically convert existing media files in the background using WordPress cron.', 'flux-media')}
+              </Typography>
+              
               <Tooltip 
                 title={!isWebPSupported() && !isAVIFSupported() ? __('Neither WebP nor AVIF conversion is supported by your server. Please install the required PHP extensions.', 'flux-media') : ''}
                 disableHoverListener={isWebPSupported() || isAVIFSupported()}

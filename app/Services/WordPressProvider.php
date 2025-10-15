@@ -135,12 +135,20 @@ class WordPressProvider {
         add_action( 'wp_ajax_flux_media_disable_conversion', [ $this, 'handle_ajax_disable_conversion' ] );
         add_action( 'wp_ajax_flux_media_enable_conversion', [ $this, 'handle_ajax_enable_conversion' ] );
         
-        // Cron job for bulk conversion
-        add_action( 'flux_media_bulk_conversion', [ $this, 'handle_bulk_conversion_cron' ] );
-        
-        // Schedule cron job if not already scheduled
-        if ( ! wp_next_scheduled( 'flux_media_bulk_conversion' ) ) {
-            wp_schedule_event( time(), 'hourly', 'flux_media_bulk_conversion' );
+        // Cron job for bulk conversion (only if enabled)
+        if ( Settings::is_bulk_conversion_enabled() ) {
+            add_action( 'flux_media_bulk_conversion', [ $this, 'handle_bulk_conversion_cron' ] );
+            
+            // Schedule cron job if not already scheduled
+            if ( ! wp_next_scheduled( 'flux_media_bulk_conversion' ) ) {
+                wp_schedule_event( time(), 'hourly', 'flux_media_bulk_conversion' );
+            }
+        } else {
+            // Unschedule cron job if bulk conversion is disabled
+            $timestamp = wp_next_scheduled( 'flux_media_bulk_conversion' );
+            if ( $timestamp ) {
+                wp_unschedule_event( $timestamp, 'flux_media_bulk_conversion' );
+            }
         }
     }
 
@@ -642,6 +650,11 @@ class WordPressProvider {
      * @return void
      */
     public function handle_bulk_conversion_cron() {
+        // Check if bulk conversion is enabled
+        if ( ! Settings::is_bulk_conversion_enabled() ) {
+            return;
+        }
+
         // Check if auto-conversion is enabled
         if ( ! Settings::is_image_auto_convert_enabled() && ! Settings::is_video_auto_convert_enabled() ) {
             return;

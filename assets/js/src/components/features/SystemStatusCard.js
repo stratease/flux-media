@@ -35,15 +35,30 @@ const SystemStatusCard = ({ status, loading, error }) => {
             <Box>
               <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
               <Skeleton variant="rectangular" width={120} height={32} sx={{ borderRadius: 1, mb: 2 }} />
-              <Skeleton variant="text" width="60%" height={20} sx={{ mb: 1 }} />
-              <Grid container spacing={1}>
-                <Grid item>
-                  <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+              
+              {/* Processor skeletons */}
+              <Box sx={{ ml: 2 }}>
+                <Skeleton variant="text" width="30%" height={24} sx={{ mb: 1 }} />
+                <Skeleton variant="text" width="50%" height={20} sx={{ mb: 1 }} />
+                <Grid container spacing={1} sx={{ mb: 2 }}>
+                  <Grid item>
+                    <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                  </Grid>
+                  <Grid item>
+                    <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                  </Grid>
                 </Grid>
-                <Grid item>
-                  <Skeleton variant="rectangular" width={60} height={24} sx={{ borderRadius: 1 }} />
+                
+                <Skeleton variant="text" width="35%" height={24} sx={{ mb: 1 }} />
+                <Grid container spacing={1}>
+                  <Grid item>
+                    <Skeleton variant="rectangular" width={80} height={24} sx={{ borderRadius: 1 }} />
+                  </Grid>
+                  <Grid item>
+                    <Skeleton variant="rectangular" width={80} height={24} sx={{ borderRadius: 1 }} />
+                  </Grid>
                 </Grid>
-              </Grid>
+              </Box>
             </Box>
           </Grid>
 
@@ -158,31 +173,43 @@ const SystemStatusCard = ({ status, loading, error }) => {
               <Typography variant="h6" gutterBottom>
                 {__('Image Processing', 'flux-media')}
               </Typography>
+              
+              {/* Overall Image Support Status */}
               <Box sx={{ mb: 2 }}>
-                {getStatusChip(imageProcessor.available, (imageProcessor.type || 'Unknown').toUpperCase())}
+                {getStatusChip(imageProcessor.available, __('Image Processing', 'flux-media'))}
               </Box>
-          
-              <Box sx={{ ml: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  {__('Version:', 'flux-media')} {imageProcessor?.version || __('Unknown', 'flux-media')}
-                </Typography>
-                <Grid container spacing={1} sx={{ mt: 1 }}>
-                  <Grid item>
-                    <Chip
-                      label="WebP"
-                      color={imageProcessor?.webp_support ? 'success' : 'error'}
-                      size="small"
-                    />
-                  </Grid>
-                  <Grid item>
-                    <Chip
-                      label="AVIF"
-                      color={imageProcessor?.avif_support ? 'success' : 'error'}
-                      size="small"
-                    />
-                  </Grid>
-                </Grid>
-              </Box>
+
+              {/* Individual Processors */}
+              {imageProcessor.processors && Object.keys(imageProcessor.processors).length > 0 && (
+                <Box sx={{ ml: 2 }}>
+                  {Object.entries(imageProcessor.processors).map(([processorType, processor]) => (
+                    <Box key={processorType} sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        {processor.type?.toUpperCase() || processorType.toUpperCase()}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {__('Version:', 'flux-media')} {processor.version || __('Unknown', 'flux-media')}
+                      </Typography>
+                      <Grid container spacing={1}>
+                        <Grid item>
+                          <Chip
+                            label="WebP"
+                            color={processor.webp_support ? 'success' : 'error'}
+                            size="small"
+                          />
+                        </Grid>
+                        <Grid item>
+                          <Chip
+                            label="AVIF"
+                            color={processor.avif_support ? 'success' : 'error'}
+                            size="small"
+                          />
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  ))}
+                </Box>
+              )}
             
             </Box>
           </Grid>
@@ -193,31 +220,43 @@ const SystemStatusCard = ({ status, loading, error }) => {
               <Typography variant="h6" gutterBottom>
                 {__('Video Processing', 'flux-media')}
               </Typography>
-              <Box sx={{ mb: 2 }}>
-                {getStatusChip(videoProcessor.available, (videoProcessor.type || 'Unknown').toUpperCase())}
-              </Box>
               
-              <Box sx={{ ml: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  {__('Version:', 'flux-media')} {videoProcessor?.version || __('Unknown', 'flux-media')}
-                </Typography> 
-                <Grid container spacing={1} sx={{ mt: 1 }}>
-                  <Grid item>
-                    <Chip
-                      label="AV1"
-                      color={videoProcessor?.av1_support ? 'success' : 'error'}
-                      size="small"
-                    />
-                  </Grid>
-                  <Grid item>
-                    <Chip
-                      label="WebM"
-                      color={videoProcessor?.webm_support ? 'success' : 'error'}
-                      size="small"
-                    />
-                  </Grid>
-                </Grid>
+              Overall Video Support Status
+              <Box sx={{ mb: 2 }}>
+                {getStatusChip(videoProcessor.available, __('Video Processing', 'flux-media'))}
               </Box>
+
+              Individual Processors
+              {videoProcessor.processors && Object.keys(videoProcessor.processors).length > 0 && (
+                <Box sx={{ ml: 2 }}>
+                  {Object.entries(videoProcessor.processors).map(([processorType, processor]) => (
+                    <Box key={processorType} sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        {processor.type?.toUpperCase() || processorType.toUpperCase()}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {__('Version:', 'flux-media')} {processor.version || __('Unknown', 'flux-media')}
+                      </Typography>
+                      <Grid container spacing={1}>
+                        <Grid item>
+                          <Chip
+                            label="AV1"
+                            color={processor.av1_support ? 'success' : 'error'}
+                            size="small"
+                          />
+                        </Grid>
+                        <Grid item>
+                          <Chip
+                            label="WebM"
+                            color={processor.webm_support ? 'success' : 'error'}
+                            size="small"
+                          />
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  ))}
+                </Box>
+              )}
             </Box>
           </Grid> */}
 

@@ -301,38 +301,4 @@ class BulkConverter {
 		return $results;
 	}
 
-	/**
-	 * Get bulk conversion statistics.
-	 *
-	 * @since 0.1.0
-	 * @return array Statistics array.
-	 */
-	public function get_bulk_conversion_stats() {
-		global $wpdb;
-
-		$stats = [];
-
-		// Total media files
-		$stats['total_media'] = $wpdb->get_var(
-			"SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment' AND (post_mime_type LIKE 'image/%' OR post_mime_type LIKE 'video/%')"
-		);
-
-		// Converted media files
-		$stats['converted_media'] = $wpdb->get_var(
-			"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} WHERE meta_key = '_flux_media_converted_formats' AND meta_value != ''"
-		);
-
-		// Disabled conversion files
-		$stats['disabled_media'] = $wpdb->get_var(
-			"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} WHERE meta_key = '_flux_media_conversion_disabled' AND meta_value = '1'"
-		);
-
-		// Unconverted media files
-		$stats['unconverted_media'] = $stats['total_media'] - $stats['converted_media'] - $stats['disabled_media'];
-
-		// Conversion percentage
-		$stats['conversion_percentage'] = $stats['total_media'] > 0 ? round( ( $stats['converted_media'] / $stats['total_media'] ) * 100, 2 ) : 0;
-
-		return $stats;
-	}
 }

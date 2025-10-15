@@ -220,6 +220,11 @@ function showNotice(message, type = 'info') {
     }, 5000);
 }
 
+// Make functions globally available
+window.fluxMediaConvertAttachment = fluxMediaConvertAttachment;
+window.fluxMediaDisableConversion = fluxMediaDisableConversion;
+window.fluxMediaEnableConversion = fluxMediaEnableConversion;
+
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function() {
