@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name: Flux Media
- * Plugin URI: https://github.com/your-org/flux-media
- * Description: Advanced image and video optimization plugin for WordPress. Converts images to WebP/AVIF and videos to AV1/WebM with high-quality settings.
+ * Plugin URI: https://wordpress.org/plugins/flux-media/
+ * Description: Compress images to AVIF/WebP for 50-70% faster loads. Boost Core Web Vitals, improve SEO rankings, and enhance user experience with automatic image optimization.
  * Version: 0.1.0
- * Author: Your Name
- * Author URI: https://yourwebsite.com
+ * Author: Flux Media
+ * Author URI: https://fluxplugins.com
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: flux-media
