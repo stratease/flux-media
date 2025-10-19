@@ -31,6 +31,7 @@ Advanced image and video optimization plugin for WordPress. Converts images to W
 - **Future Integration**: Ready for SaaS API integration when service is deployed
 - **Enhanced Conversions**: SaaS API will provide improved conversion quality and performance
 - **Expanded Support**: Additional format support and advanced features via SaaS service
+- **Privacy Compliant**: Full compliance with WordPress.org SaaS guidelines and privacy regulations
 
 ### Modern Admin Interface
 - **React Router**: Hash-based routing with Link components for seamless navigation
@@ -51,6 +52,29 @@ Advanced image and video optimization plugin for WordPress. Converts images to W
 - **Attribute Preservation**: Maintains all WordPress image attributes and functionality
 - **Progressive Enhancement**: Graceful fallback to original images when needed
 - **Zero Configuration**: Works automatically without theme or content changes
+
+## 🔒 Privacy & Data Protection
+
+### Local Processing (Default)
+- **No External Data Sharing**: All image and video processing happens locally on your server
+- **Your Data Stays Private**: Media files never leave your WordPress installation
+- **No Third-Party Services**: No external APIs or services are used by default
+
+### Optional SaaS Service
+- **Opt-in Only**: SaaS features require explicit user consent before activation
+- **External Processing**: When enabled, media files may be sent to our secure cloud infrastructure
+- **Email Communications**: Service updates and support emails sent to [External Service] for storage and marketing
+- **Data Sharing**: Usage statistics and account information shared with trusted service providers
+- **Consent Management**: Granular controls for which features to enable
+- **Withdrawal Rights**: You can disable SaaS features and withdraw consent at any time
+
+### Compliance
+- **WordPress Guidelines**: Compliant with WordPress.org Guideline 6 for SaaS services
+- **GDPR Ready**: Designed to comply with European data protection regulations
+- **CCPA Compliant**: Meets California Consumer Privacy Act requirements
+- **Transparent Practices**: Clear documentation of all data collection and usage
+
+**📋 [View Full Privacy Policy](https://fluxplugins.com/privacy-policy/)**
 
 ## 🏗️ Architecture
 
@@ -656,6 +680,14 @@ The plugin is designed for SaaS API integration with license key authentication:
 - **Enhanced Quality**: SaaS API will provide superior conversion quality and optimization
 - **Expanded Formats**: Additional image and video format support via SaaS service
 - **Advanced Features**: AI-powered optimization and advanced processing capabilities
+
+**Privacy & Compliance:**
+- **WordPress Guidelines**: Full compliance with WordPress.org Guideline 6 for SaaS services
+- **Opt-in Consent**: All external data sharing requires explicit user consent
+- **Data Transparency**: Clear documentation of data collection and usage practices
+- **Privacy Policy**: Comprehensive privacy policy available at [https://fluxplugins.com/privacy-policy/](https://fluxplugins.com/privacy-policy/)
+- **External Services**: Integration with external services for email storage and marketing (with consent)
+- **User Rights**: Full control over data sharing and withdrawal of consent
 
 ### Hybrid Image Conversion
 The plugin implements a hybrid approach for optimal image performance:

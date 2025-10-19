@@ -87,12 +87,17 @@ class AdminController {
 			true
 		);
 
+		// Get current user email
+		$current_user = wp_get_current_user();
+		$user_email = $current_user->ID ? $current_user->user_email : '';
+
 		// Localize script with WordPress data
 		wp_localize_script( 'flux-media-admin', 'fluxMediaAdmin', [
 			'apiUrl' => rest_url( 'flux-media/v1/' ),
 			'nonce' => wp_create_nonce( 'wp_rest' ),
 			'adminUrl' => admin_url(),
 			'pluginUrl' => FLUX_MEDIA_PLUGIN_URL,
+			'userEmail' => $user_email,
 		] );
 
 		// Enqueue WordPress admin styles

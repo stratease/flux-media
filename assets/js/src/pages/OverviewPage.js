@@ -32,14 +32,6 @@ const OverviewPage = () => {
 
   return (
     <Box>
-      <Typography variant="h4" component="h1" gutterBottom>
-        {__('Overview', 'flux-media')}
-      </Typography>
-      
-      <Typography variant="body1" color="text.secondary" paragraph>
-        {__('Monitor your media optimization performance and system status.', 'flux-media')}
-      </Typography>
-
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
           <SystemStatusCard 

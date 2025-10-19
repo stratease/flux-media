@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Box, Grid, Switch, FormControlLabel, Alert, Divider, TextField, Stack, Tooltip } from '@mui/material';
+import { Typography, Box, Grid, Switch, FormControlLabel, Alert, Divider, TextField, Stack, FormHelperText, Skeleton } from '@mui/material';
 import { __, _x } from '@wordpress/i18n';
 import { useAutoSaveForm } from '@flux-media/hooks/useAutoSaveForm';
 import { useOptions } from '@flux-media/hooks/useOptions';
 import { useSystemStatus } from '@flux-media/hooks/useSystemStatus';
+import { SubscribeForm, SettingsSkeleton } from '@flux-media/components';
 
 /**
  * Settings page component with auto-save functionality
@@ -75,16 +76,6 @@ const SettingsPage = () => {
 
   return (
     <Box>
-      <Grid container justifyContent="space-between" alignItems="flex-start" sx={{ mb: 4 }}>
-        <Grid item>
-          <Typography variant="h3" component="h1" gutterBottom>
-            {__('Flux Media Settings', 'flux-media')}
-          </Typography>
-          <Typography variant="subtitle1" color="text.secondary">
-            {__('Configure your image optimization preferences', 'flux-media')}
-          </Typography>
-        </Grid>
-      </Grid>
 
       {hasError && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -92,16 +83,27 @@ const SettingsPage = () => {
         </Alert>
       )}
 
-      {isLoading && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          {__('Loading settings...', 'flux-media')}
-        </Alert>
-      )}
+      {isLoading ? (
+        <SettingsSkeleton />
+      ) : (
+        <>
+          {/* Format Support Alert */}
+          {(!isWebPSupported() || !isAVIFSupported()) && (
+            <Alert severity="warning" sx={{ mb: 3 }}>
+              <Typography variant="body2">
+                {!isWebPSupported() && !isAVIFSupported() 
+                  ? __('Neither WebP nor AVIF conversion is supported by your server. Please install the required PHP extensions (GD or Imagick with WebP/AVIF support) to enable image optimization.', 'flux-media')
+                  : !isWebPSupported() 
+                    ? __('WebP conversion is not supported by your server. Please install the required PHP extensions (GD or Imagick with WebP support) to enable WebP optimization.', 'flux-media')
+                    : __('AVIF conversion is not supported by your server. Please install Imagick with AVIF support to enable AVIF optimization.', 'flux-media')
+                }
+              </Typography>
+            </Alert>
+          )}
 
-      <Grid container spacing={3}>
+          <Grid container spacing={3}>
         {/* General Settings */}
         <Grid item xs={12} md={6}>
-          <Divider sx={{ mb: 3 }} />
           <Box>
             <Typography variant="h5" gutterBottom>
               {__('General Settings', 'flux-media')}
@@ -127,15 +129,13 @@ const SettingsPage = () => {
                   />
                 }
                 label={__('Enable bulk conversion', 'flux-media')}
-              />
-              <Typography variant="body2" color="text.secondary" sx={{ ml: 4, mb: 1 }}>
-                {__('Automatically convert existing media files in the background using WordPress cron.', 'flux-media')}
-              </Typography>
+              /> 
+              <FormHelperText>
               
-              <Tooltip 
-                title={!isWebPSupported() && !isAVIFSupported() ? __('Neither WebP nor AVIF conversion is supported by your server. Please install the required PHP extensions.', 'flux-media') : ''}
-                disableHoverListener={isWebPSupported() || isAVIFSupported()}
-              >
+                {__('Automatically convert existing media files in the background using WordPress cron.', 'flux-media')}
+            
+            </FormHelperText>
+         
                 <FormControlLabel
                   control={
                     <Switch
@@ -144,70 +144,58 @@ const SettingsPage = () => {
                       onChange={handleSettingChange('hybrid_approach')}
                     />
                   }
-                  label={__('Hybrid approach (WebP + AVIF)', 'flux-media')}
+                  label={__('Hybrid approach (experimental - use with caution)', 'flux-media')}
                 />
-              </Tooltip>
+                            <FormHelperText>
+              {
+              __('Creates both WebP and AVIF formats when supported by your server. Serves AVIF where supported (via <picture> tags or server detection), with WebP and the original image as fallback. This is the recommended approach for maximum performance and device compatibility. This is more dependent on theme and plugin compatibility than the native approach.', 'flux-media')
+              }
+            </FormHelperText>
 
               {!settings?.hybrid_approach && (
                 <>
-                  <Tooltip 
-                    title={!isWebPSupported() ? __('WebP conversion is not supported by your server. Please install the required PHP extensions (GD or Imagick with WebP support).', 'flux-media') : ''}
-                    disableHoverListener={isWebPSupported()}
-                  >
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={settings?.image_formats?.includes('webp')}
-                          disabled={isLoading || !isWebPSupported()}
-                          onChange={(e) => {
-                            const newFormats = e.target.checked 
-                              ? [...(settings?.image_formats || []).filter(f => f !== 'webp'), 'webp']
-                              : (settings?.image_formats || []).filter(f => f !== 'webp');
-                            
-                            // Save only the image_formats field
-                            // React Query will handle updating the cache after successful save
-                            debouncedSave({ image_formats: newFormats });
-                          }}
-                        />
-                      }
-                      label={__('Enable WebP conversion', 'flux-media')}
-                    />
-                  </Tooltip>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={settings?.image_formats?.includes('webp')}
+                        disabled={isLoading || !isWebPSupported()}
+                        onChange={(e) => {
+                          const newFormats = e.target.checked 
+                            ? [...(settings?.image_formats || []).filter(f => f !== 'webp'), 'webp']
+                            : (settings?.image_formats || []).filter(f => f !== 'webp');
+                          
+                          // Save only the image_formats field
+                          // React Query will handle updating the cache after successful save
+                          debouncedSave({ image_formats: newFormats });
+                        }}
+                      />
+                    }
+                    label={__('Enable WebP conversion', 'flux-media')}
+                  />
                   
-                  <Tooltip 
-                    title={!isAVIFSupported() ? __('AVIF conversion is not supported by your server. Please install Imagick with AVIF support.', 'flux-media') : ''}
-                    disableHoverListener={isAVIFSupported()}
-                  >
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={settings?.image_formats?.includes('avif')}
-                          disabled={isLoading || !isAVIFSupported()}
-                          onChange={(e) => {
-                            const newFormats = e.target.checked 
-                              ? [...(settings?.image_formats || []).filter(f => f !== 'avif'), 'avif']
-                              : (settings?.image_formats || []).filter(f => f !== 'avif');
-                            
-                            // Save only the image_formats field
-                            // React Query will handle updating the cache after successful save
-                            debouncedSave({ image_formats: newFormats });
-                          }}
-                        />
-                      }
-                      label={__('Enable AVIF conversion', 'flux-media')}
-                    />
-                  </Tooltip>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={settings?.image_formats?.includes('avif')}
+                        disabled={isLoading || !isAVIFSupported()}
+                        onChange={(e) => {
+                          const newFormats = e.target.checked 
+                            ? [...(settings?.image_formats || []).filter(f => f !== 'avif'), 'avif']
+                            : (settings?.image_formats || []).filter(f => f !== 'avif');
+                          
+                          // Save only the image_formats field
+                          // React Query will handle updating the cache after successful save
+                          debouncedSave({ image_formats: newFormats });
+                        }}
+                      />
+                    }
+                    label={__('Enable AVIF conversion', 'flux-media')}
+                  />
                 </>
               )}
             </Stack>
             
-            {settings?.hybrid_approach && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
-                <Typography variant="body2" color="info.contrastText">
-                  <strong>{__('Hybrid Approach:', 'flux-media')}</strong> {__('Creates both WebP and AVIF formats. Serves AVIF where supported (via <picture> tags or server detection), with WebP as fallback. This is the recommended approach for maximum performance and compatibility.', 'flux-media')}
-                </Typography>
-              </Box>
-            )}
+
           </Box>
         </Grid>
 
@@ -253,83 +241,67 @@ const SettingsPage = () => {
 
         {/* Image Quality Settings */}
         <Grid item xs={12} md={6}>
-          <Divider sx={{ my: 2 }} />
           <Box>
             <Typography variant="h5" gutterBottom>
               {__('Image Quality Settings', 'flux-media')}
             </Typography>
             <Stack spacing={3}>
               {/* WebP Quality */}
-              <Tooltip 
-                title={!isWebPSupported() ? __('WebP quality settings are disabled because WebP conversion is not supported by your server.', 'flux-media') : ''}
-                disableHoverListener={isWebPSupported()}
-              >
-                <Box sx={{ opacity: isWebPSupported() ? 1 : 0.5 }}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    {__('WebP Quality', 'flux-media')}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    {__('Current:', 'flux-media')} {settings?.image_webp_quality}% ({__('Higher values produce larger files with better quality', 'flux-media')})
-                  </Typography>
-                  <input
-                    type="range"
-                    min="60"
-                    max="100"
-                    value={settings?.image_webp_quality}
-                    disabled={isLoading || !isWebPSupported()}
-                    onChange={handleSettingChange('image_webp_quality')}
-                    style={{ width: '100%' }}
-                  />
-                </Box>
-              </Tooltip>
+              <Box sx={{ opacity: isWebPSupported() ? 1 : 0.5 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  {__('WebP Quality', 'flux-media')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  {__('Current:', 'flux-media')} {settings?.image_webp_quality}% ({__('Higher values produce larger files with better quality', 'flux-media')})
+                </Typography>
+                <input
+                  type="range"
+                  min="60"
+                  max="100"
+                  value={settings?.image_webp_quality}
+                  disabled={isLoading || !isWebPSupported()}
+                  onChange={handleSettingChange('image_webp_quality')}
+                  style={{ width: '100%' }}
+                />
+              </Box>
 
               {/* AVIF Quality */}
-              <Tooltip 
-                title={!isAVIFSupported() ? __('AVIF quality settings are disabled because AVIF conversion is not supported by your server.', 'flux-media') : ''}
-                disableHoverListener={isAVIFSupported()}
-              >
-                <Box sx={{ opacity: isAVIFSupported() ? 1 : 0.5 }}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    {__('AVIF Quality', 'flux-media')}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    {__('Current:', 'flux-media')} {settings?.image_avif_quality}% ({__('AVIF typically needs lower quality for similar file size', 'flux-media')})
-                  </Typography>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={settings?.image_avif_quality}
-                    disabled={isLoading || !isAVIFSupported()}
-                    onChange={handleSettingChange('image_avif_quality')}
-                    style={{ width: '100%' }}
-                  />
-                </Box>
-              </Tooltip>
+              <Box sx={{ opacity: isAVIFSupported() ? 1 : 0.5 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  {__('AVIF Quality', 'flux-media')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  {__('Current:', 'flux-media')} {settings?.image_avif_quality}% ({__('AVIF typically needs lower quality for similar file size', 'flux-media')})
+                </Typography>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={settings?.image_avif_quality}
+                  disabled={isLoading || !isAVIFSupported()}
+                  onChange={handleSettingChange('image_avif_quality')}
+                  style={{ width: '100%' }}
+                />
+              </Box>
 
               {/* AVIF Speed */}
-              <Tooltip 
-                title={!isAVIFSupported() ? __('AVIF speed settings are disabled because AVIF conversion is not supported by your server.', 'flux-media') : ''}
-                disableHoverListener={isAVIFSupported()}
-              >
-                <Box sx={{ opacity: isAVIFSupported() ? 1 : 0.5 }}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    {__('AVIF Speed', 'flux-media')}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    {__('Current:', 'flux-media')} {settings?.image_avif_speed} ({__('Lower values = slower encoding but better compression', 'flux-media')})
-                  </Typography>
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    value={settings?.image_avif_speed}
-                    disabled={isLoading || !isAVIFSupported()}
-                    onChange={handleSettingChange('image_avif_speed')}
-                    style={{ width: '100%' }}
-                  />
-                </Box>
-              </Tooltip>
+              <Box sx={{ opacity: isAVIFSupported() ? 1 : 0.5 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  {__('AVIF Speed', 'flux-media')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  {__('Current:', 'flux-media')} {settings?.image_avif_speed} ({__('Lower values = slower encoding but better compression', 'flux-media')})
+                </Typography>
+                <input
+                  type="range"
+                  min="0"
+                  max="10"
+                  value={settings?.image_avif_speed}
+                  disabled={isLoading || !isAVIFSupported()}
+                  onChange={handleSettingChange('image_avif_speed')}
+                  style={{ width: '100%' }}
+                />
+              </Box>
             </Stack>
           </Box>
         </Grid>
@@ -454,8 +426,15 @@ const SettingsPage = () => {
           </Box>
         </Grid>
 
+        {/* Newsletter Subscription */}
+        <Grid item xs={12}>
+          <Divider sx={{ my: 2 }} />
+          <SubscribeForm />
+        </Grid>
 
-      </Grid>
+          </Grid>
+        </>
+      )}
     </Box>
   );
 };

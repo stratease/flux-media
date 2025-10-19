@@ -7,3 +7,4 @@ export { useStartConversion, useCancelConversion, useBulkConvert, useDeleteConve
 export { useLogs } from './useLogs';
 export { useCleanupTempFiles, useCleanupOldRecords } from './useCleanup';
 export { useAutoSaveForm } from './useAutoSaveForm';
+export { useSubscribeNewsletter } from './useUser';

@@ -103,8 +103,6 @@ class Plugin {
         
         // Initialize REST API
         $this->init_rest_api();
-        
-        $this->logger->info( 'Flux Media plugin initialized successfully' );
     }
 
     /**
@@ -153,7 +151,6 @@ class Plugin {
         $status_controller = new StatusController( $format_detector, $processor_detector, $quota_manager );
         $conversions_controller = new ConversionsController( $conversion_tracker );
         $logs_controller = new LogsController( $logs_service );
-
         $options_controller->register_routes();
         $status_controller->register_routes();
         $conversions_controller->register_routes();

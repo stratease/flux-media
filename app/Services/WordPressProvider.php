@@ -93,7 +93,7 @@ class WordPressProvider {
         $this->video_converter = $video_converter;
         $this->image_renderer = new WordPressImageRenderer( $image_converter, $video_converter );
         $this->quota_manager = new QuotaManager( $this->logger );
-        $this->conversion_tracker = new ConversionTracker( $this->logger, $this->quota_manager );
+        $this->conversion_tracker = new ConversionTracker( $this->logger );
         $this->bulk_converter = new BulkConverter( $this->logger, $image_converter, $video_converter, $this->quota_manager, $this->conversion_tracker );
     }
 
@@ -124,10 +124,13 @@ class WordPressProvider {
         // Cleanup hooks
         add_action( 'delete_attachment', [ $this, 'handle_attachment_deletion' ] );
         
-        // Image rendering hooks
-        add_filter( 'wp_get_attachment_image_attributes', [ $this, 'handle_image_attributes_filter' ], 10, 3 );
+        // Image rendering hooks - all hooks are registered, hybrid approach is checked inside each callback
+        add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
         add_filter( 'wp_content_img_tag', [ $this, 'handle_content_images_filter' ], 10, 3 );
         add_filter( 'the_content', [ $this, 'handle_post_content_images_filter' ], 20 );
+        add_filter( 'render_block', [ $this, 'handle_render_block_filter' ], 10, 2 );
+        
+        // Always add attachment fields for admin display
         add_filter( 'attachment_fields_to_edit', [ $this, 'handle_attachment_fields_filter' ], 10, 2 );
         
         // AJAX handlers for attachment actions
@@ -462,17 +465,16 @@ class WordPressProvider {
     }
 
     /**
-     * Handle image attributes filter.
+     * Handle attachment URL filter.
      *
      * @since 0.1.0
-     * @param array    $attr Image attributes.
-     * @param \WP_Post $attachment Attachment post object.
-     * @param string   $size Image size.
-     * @return array Modified attributes.
+     * @param string $url The attachment URL.
+     * @param int    $attachment_id The attachment ID.
+     * @return string Modified URL.
      */
-    public function handle_image_attributes_filter( $attr, $attachment, $size ) {
-        $converted_files = $this->get_converted_files( $attachment->ID );
-        return $this->image_renderer->modify_image_attributes( $attr, $attachment, $size, $converted_files );
+    public function handle_attachment_url_filter( $url, $attachment_id ) {
+        $converted_files = $this->get_converted_files( $attachment_id );
+        return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
     }
 
     /**
@@ -498,6 +500,18 @@ class WordPressProvider {
      */
     public function handle_post_content_images_filter( $content ) {
         return $this->image_renderer->modify_post_content_images( $content );
+    }
+
+    /**
+     * Handle render block filter for block editor images.
+     *
+     * @since 0.1.0
+     * @param string $block_content The block content.
+     * @param array  $block The block data.
+     * @return string Modified block content.
+     */
+    public function handle_render_block_filter( $block_content, $block ) {
+        return $this->image_renderer->modify_block_content( $block_content, $block );
     }
 
     /**
@@ -666,4 +680,5 @@ class WordPressProvider {
 
         $this->logger->info( 'Bulk conversion cron completed. Processed: ' . $results['processed'] . ', Converted: ' . $results['converted'] . ', Errors: ' . $results['errors'] );
     }
+
 }

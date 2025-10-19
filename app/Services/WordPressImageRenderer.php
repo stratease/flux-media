@@ -8,7 +8,7 @@
 
 namespace FluxMedia\App\Services;
 
-use FluxMedia\Interfaces\Converter;
+use FluxMedia\App\Services\Converter;
 
 /**
  * WordPress image renderer for handling image display and optimization.
@@ -43,6 +43,78 @@ class WordPressImageRenderer {
     public function __construct( ImageConverter $image_converter, VideoConverter $video_converter ) {
         $this->image_converter = $image_converter;
         $this->video_converter = $video_converter;
+    }
+
+    /**
+     * Enqueue inline CSS for picture elements.
+     * This ensures proper styling when picture elements are rendered.
+     *
+     * @since 0.1.0
+     * @return void
+     */
+    private function enqueue_picture_css() {
+        // Only enqueue once per request
+        static $css_enqueued = false;
+        if ( $css_enqueued ) {
+            return;
+        }
+        
+        $css = '
+        .wp-block-image source {
+            max-width: 100%;
+            display: block;
+            margin: 0 auto; /* Center if needed */
+        }
+        .wp-block-image source {
+            max-width: 100%;
+            height: auto; /* Preserve aspect ratio */
+        }
+        .aligncenter source {
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .alignleft source {
+            float: left;
+            margin-right: 1em;
+        }
+        .alignright source {
+            float: right;
+            margin-left: 1em;
+        }';
+        
+        // Try multiple approaches to ensure CSS is loaded
+        $this->add_picture_css_inline( $css );
+        $css_enqueued = true;
+    }
+
+    /**
+     * Add picture CSS using the most reliable method available.
+     *
+     * @since 0.1.0
+     * @param string $css The CSS to add.
+     * @return void
+     */
+    private function add_picture_css_inline( $css ) {
+        // Method 2: Try to add to common WordPress stylesheets
+        $common_handles = [ 'wp-block-library', 'wp-includes', 'common', 'admin-bar' ];
+        foreach ( $common_handles as $handle ) {
+            if ( wp_style_is( $handle, 'enqueued' ) || wp_style_is( $handle, 'done' ) ) {
+                wp_add_inline_style( $handle, $css );
+                return;
+            }
+        }
+        
+        // Method 3: Create a custom handle and enqueue it
+        wp_register_style( 'flux-media-picture-styles', false );
+        wp_enqueue_style( 'flux-media-picture-styles' );
+        wp_add_inline_style( 'flux-media-picture-styles', $css );
+        
+        // Method 4: Fallback - add directly to head if we're in the right context
+        if ( ! is_admin() && ! did_action( 'wp_head' ) ) {
+            add_action( 'wp_head', function() use ( $css ) {
+                echo '<style type="text/css" id="flux-media-picture-styles">' . $css . '</style>';
+            }, 20 );
+        }
     }
 
     /**
@@ -110,35 +182,29 @@ class WordPressImageRenderer {
     }
 
     /**
-     * Modify image attributes for optimized display.
+     * Modify attachment URL for optimized display.
      *
      * @since 0.1.0
-     * @param array    $attr Image attributes.
-     * @param \WP_Post $attachment Attachment post object.
-     * @param string   $size Image size.
-     * @param array    $converted_files Array of converted file paths.
-     * @return array Modified attributes.
+     * @param string $url The original attachment URL.
+     * @param int    $attachment_id The attachment ID.
+     * @param array  $converted_files Array of converted file paths.
+     * @return string Modified URL.
      */
-    public function modify_image_attributes( $attr, $attachment, $size, $converted_files ) {
+    public function modify_attachment_url( $url, $attachment_id, $converted_files ) {
         if ( empty( $converted_files ) ) {
-            return $attr;
+            return $url;
         }
 
-        // Check if hybrid approach is enabled
-        $hybrid_approach = \FluxMedia\App\Services\Settings::is_hybrid_approach_enabled();
-        
-        if ( $hybrid_approach && isset( $converted_files[ Converter::FORMAT_AVIF ] ) && isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            // Use picture element for hybrid approach
-            $this->add_picture_element_support( $attr, $attachment, $converted_files );
+        // Single format approach: Use priority AVIF > WebP
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            // Use AVIF as primary format
+            return self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
         } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
             // Use WebP as primary format
-            $attr['src'] = self::get_image_url_from_attachment( $attachment->ID, Converter::FORMAT_WEBP );
-        } elseif ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
-            // Use AVIF as primary format
-            $attr['src'] = self::get_image_url_from_attachment( $attachment->ID, Converter::FORMAT_AVIF );
+            return self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
         }
 
-        return $attr;
+        return $url;
     }
 
     /**
@@ -156,23 +222,71 @@ class WordPressImageRenderer {
             return $filtered_image;
         }
 
-        // Check if hybrid approach is enabled
-        $hybrid_approach = \FluxMedia\App\Services\Settings::is_hybrid_approach_enabled();
-        
-        if ( $hybrid_approach && isset( $converted_files[ Converter::FORMAT_AVIF ] ) && isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            // Replace with picture element
-            return $this->create_picture_element( $attachment_id, $converted_files, $filtered_image );
-        } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            // Replace src with WebP version
-            $webp_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
-            return str_replace( wp_get_attachment_url( $attachment_id ), $webp_url, $filtered_image );
-        } elseif ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
-            // Replace src with AVIF version
-            $avif_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
-            return str_replace( wp_get_attachment_url( $attachment_id ), $avif_url, $filtered_image );
+        // Check if we have converted formats available
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            if ( Settings::is_hybrid_approach_enabled() ) {
+                // Hybrid approach: Use picture element with sources and fallback
+                $this->enqueue_picture_css();
+                return $this->create_picture_element( $attachment_id, $converted_files, $filtered_image );
+            } else {
+                // Single format approach: Replace src with best available format
+                return $this->replace_img_src( $filtered_image, $attachment_id, $converted_files );
+            }
         }
 
         return $filtered_image;
+    }
+
+    /**
+     * Modify block content for optimized display.
+     *
+     * @since 0.1.0
+     * @param string $block_content The block content.
+     * @param array  $block The block data.
+     * @return string Modified block content.
+     */
+    public function modify_block_content( $block_content, $block ) {
+        // Only process image blocks
+        if ( ! in_array( $block['blockName'], [ 'core/image' ], true ) ) {
+            return $block_content;
+        }
+
+        // Get block attributes
+        $attributes = $block['attrs'] ?? [];
+        
+        // Get attachment ID - try 'id' attribute first, then fall back to URL lookup
+        $attachment_id = null;
+        
+        if ( ! empty( $attributes['id'] ) ) {
+            $attachment_id = (int) $attributes['id'];
+        } elseif ( ! empty( $attributes['url'] ) ) {
+            $image_url = $attributes['url'];
+            $attachment_id = $this->get_attachment_id_from_url( $image_url );
+        }
+        
+        if ( ! $attachment_id ) {
+            return $block_content;
+        }
+
+        // Get converted files
+        $converted_files = get_post_meta( $attachment_id, '_flux_media_converted_files', true );
+        if ( empty( $converted_files ) ) {
+            return $block_content;
+        }
+
+        // Check if we have converted formats available
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            if ( Settings::is_hybrid_approach_enabled() ) {
+                // Hybrid approach: Use picture element with sources and fallback
+                $this->enqueue_picture_css();
+                return $this->create_block_picture_element( $attachment_id, $converted_files, $block_content, $attributes );
+            } else {
+                // Single format approach: Replace src with best available format
+                return $this->replace_block_img_src( $block_content, $attachment_id, $converted_files );
+            }
+        }
+
+        return $block_content;
     }
 
     /**
@@ -204,20 +318,16 @@ class WordPressImageRenderer {
                 return $full_match;
             }
             
-            // Check if hybrid approach is enabled
-            $hybrid_approach = \FluxMedia\App\Services\Settings::is_hybrid_approach_enabled();
-            
-            if ( $hybrid_approach && isset( $converted_files[ Converter::FORMAT_AVIF ] ) && isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-                // Replace with picture element
-                return $this->create_picture_element( $attachment_id, $converted_files, $full_match );
-            } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-                // Replace src with WebP version
-                $webp_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
-                return str_replace( $src_url, $webp_url, $full_match );
-            } elseif ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
-                // Replace src with AVIF version
-                $avif_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
-                return str_replace( $src_url, $avif_url, $full_match );
+            // Check if we have converted formats available
+            if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+                if ( Settings::is_hybrid_approach_enabled() ) {
+                    // Hybrid approach: Use picture element with sources and fallback
+                    $this->enqueue_picture_css();
+                    return $this->create_picture_element( $attachment_id, $converted_files, $full_match );
+                } else {
+                    // Single format approach: Replace src with best available format
+                    return $this->replace_img_src( $full_match, $attachment_id, $converted_files );
+                }
             }
             
             return $full_match;
@@ -257,21 +367,51 @@ class WordPressImageRenderer {
         return $form_fields;
     }
 
+
     /**
-     * Add picture element support for hybrid approach.
+     * Create picture element for block editor images.
      *
      * @since 0.1.0
-     * @param array    $attr Image attributes.
-     * @param \WP_Post $attachment Attachment post object.
-     * @param array    $converted_files Array of converted file paths.
-     * @return void
+     * @param int    $attachment_id Attachment ID.
+     * @param array  $converted_files Array of converted file paths.
+     * @param string $block_content Original block content.
+     * @param array  $attributes Block attributes.
+     * @return string Picture element HTML.
      */
-    private function add_picture_element_support( $attr, $attachment, $converted_files ) {
-        // This would be implemented to add picture element support
-        // For now, we'll use WebP as fallback
-        if ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            $attr['src'] = self::get_image_url_from_attachment( $attachment->ID, Converter::FORMAT_WEBP );
+    private function create_block_picture_element( $attachment_id, $converted_files, $block_content, $attributes ) {
+        // Get the size from block attributes, default to 'full'
+        $size = $attributes['sizeSlug'] ?? 'full';
+        
+        // Get image attributes for the fallback img tag
+        $img_attributes = [
+            'alt' => $attributes['alt'] ?? '',
+            'class' => $attributes['className'] ?? '',
+            'loading' => $attributes['loading'] ?? 'lazy',
+        ];
+        
+        // Extract wrapper attributes from the existing block content
+        $wrapper_attributes = $this->extract_wrapper_attributes_from_block_content( $block_content );
+        
+        // Build picture element with proper wrapper attributes
+        $picture_html = '<picture' . ( $wrapper_attributes ? ' ' . $wrapper_attributes : '' ) . '>';
+        
+        // Add AVIF source if available
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            $avif_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
+            $picture_html .= '<source srcset="' . esc_attr( $avif_url ) . '" type="image/avif">';
         }
+        
+        // Add WebP source if available
+        if ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $webp_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
+            $picture_html .= '<source srcset="' . esc_attr( $webp_url ) . '" type="image/webp">';
+        }
+        
+        // Add fallback img element using WordPress function
+        $picture_html .= wp_get_attachment_image( $attachment_id, $size, false, $img_attributes );
+        $picture_html .= '</picture>';
+        
+        return $picture_html;
     }
 
     /**
@@ -284,8 +424,6 @@ class WordPressImageRenderer {
      * @return string Picture element HTML.
      */
     private function create_picture_element( $attachment_id, $converted_files, $original_html ) {
-        $avif_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
-        $webp_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
         $original_url = wp_get_attachment_url( $attachment_id );
         
         // Extract attributes from original HTML
@@ -295,16 +433,26 @@ class WordPressImageRenderer {
         // Replace src in attributes with original URL
         $attributes = preg_replace( '/src=["\'][^"\']*["\']/', 'src="' . esc_url( $original_url ) . '"', $attributes );
         
-        return sprintf(
-            '<picture>
-                <source srcset="%s" type="image/avif">
-                <source srcset="%s" type="image/webp">
-                <img%s>
-            </picture>',
-            esc_url( $avif_url ),
-            esc_url( $webp_url ),
-            $attributes
-        );
+        // Build picture element with available sources
+        $picture_html = '<picture>';
+        
+        // Add AVIF source if available
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            $avif_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
+            $picture_html .= '<source srcset="' . esc_attr( $avif_url ) . '" type="image/avif">';
+        }
+        
+        // Add WebP source if available
+        if ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $webp_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
+            $picture_html .= '<source srcset="' . esc_attr( $webp_url ) . '" type="image/webp">';
+        }
+        
+        // Add fallback img element
+        $picture_html .= '<img' . $attributes . '>';
+        $picture_html .= '</picture>';
+        
+        return $picture_html;
     }
 
     /**
@@ -344,7 +492,7 @@ class WordPressImageRenderer {
         $upload_dir = wp_upload_dir();
         
         // Handle different path formats
-        $relative_path = $this->normalize_file_path( $file_path, $upload_dir );
+        $relative_path = self::normalize_file_path( $file_path, $upload_dir );
         
         if ( $relative_path === null ) {
             return null;
@@ -370,7 +518,7 @@ class WordPressImageRenderer {
      * @param array  $upload_dir WordPress upload directory array.
      * @return string|null Normalized relative path or null if invalid.
      */
-    private function normalize_file_path( $file_path, $upload_dir ) {
+    private static function normalize_file_path( $file_path, $upload_dir ) {
         // Handle absolute paths
         if ( strpos( $file_path, $upload_dir['basedir'] ) === 0 ) {
             // Remove the upload directory base path
@@ -406,6 +554,35 @@ class WordPressImageRenderer {
         
         // If we can't normalize the path, return null
         return null;
+    }
+
+
+
+
+    /**
+     * Extract wrapper attributes from existing block content.
+     *
+     * @since 0.1.0
+     * @param string $block_content The existing block content HTML.
+     * @return string Extracted wrapper attributes string.
+     */
+    private function extract_wrapper_attributes_from_block_content( $block_content ) {
+        // Look for figure wrapper (most common for image blocks)
+        if ( preg_match( '/<figure([^>]*?)>/i', $block_content, $matches ) ) {
+            return trim( $matches[1] );
+        }
+        
+        // Look for div wrapper (alternative wrapper)
+        if ( preg_match( '/<div([^>]*?)>/i', $block_content, $matches ) ) {
+            return trim( $matches[1] );
+        }
+        
+        // Look for any wrapper element that contains an img tag
+        if ( preg_match( '/<([a-zA-Z][a-zA-Z0-9]*)([^>]*?)>\s*<img/i', $block_content, $matches ) ) {
+            return trim( $matches[2] );
+        }
+        
+        return '';
     }
 
     /**
@@ -539,5 +716,59 @@ class WordPressImageRenderer {
         
         $html .= '</div>';
         return $html;
+    }
+
+    /**
+     * Replace img src attribute with optimized format (single format approach).
+     *
+     * @since 0.1.0
+     * @param string $img_html Original img HTML.
+     * @param int    $attachment_id Attachment ID.
+     * @param array  $converted_files Array of converted file paths.
+     * @return string Modified img HTML.
+     */
+    private function replace_img_src( $img_html, $attachment_id, $converted_files ) {
+        // Priority: AVIF > WebP
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            $new_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
+        } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $new_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
+        } else {
+            return $img_html;
+        }
+        
+        // Replace src attribute
+        return preg_replace(
+            '/src=["\']([^"\']*?)["\']/',
+            'src="' . esc_url( $new_url ) . '"',
+            $img_html
+        );
+    }
+
+    /**
+     * Replace img src attribute in block content (single format approach).
+     *
+     * @since 0.1.0
+     * @param string $block_content Original block content.
+     * @param int    $attachment_id Attachment ID.
+     * @param array  $converted_files Array of converted file paths.
+     * @return string Modified block content.
+     */
+    private function replace_block_img_src( $block_content, $attachment_id, $converted_files ) {
+        // Priority: AVIF > WebP
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            $new_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
+        } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $new_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
+        } else {
+            return $block_content;
+        }
+        
+        // Replace src attribute in block content
+        return preg_replace(
+            '/src=["\']([^"\']*?)["\']/',
+            'src="' . esc_url( $new_url ) . '"',
+            $block_content
+        );
     }
 }

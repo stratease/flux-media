@@ -30,7 +30,7 @@ class Settings {
 	 *
 	 * @since 0.1.0
 	 */
-	const DEFAULT_AVIF_SPEED = 6;
+	const DEFAULT_AVIF_SPEED = 5;
 	const DEFAULT_VIDEO_AV1_PRESET = 'medium';
 	const DEFAULT_VIDEO_WEBM_PRESET = 'medium';
 
@@ -49,7 +49,7 @@ class Settings {
 	 */
 	const DEFAULT_IMAGE_AUTO_CONVERT = true;
 	const DEFAULT_VIDEO_AUTO_CONVERT = true;
-	const DEFAULT_HYBRID_APPROACH = true;
+	const DEFAULT_HYBRID_APPROACH = false;
 	const DEFAULT_BULK_CONVERSION_ENABLED = false;
 
 	/**
@@ -228,6 +228,41 @@ class Settings {
 	 */
 	public static function get_avif_speed() {
 		return (int) self::get( 'image_avif_speed', self::DEFAULT_AVIF_SPEED );
+	}
+
+	/**
+	 * Get version-specific AVIF recommendations.
+	 *
+	 * @since 0.1.0
+	 * @return array Recommended settings by ImageMagick version.
+	 */
+	public static function get_avif_version_recommendations() {
+		return [
+			'6.x' => [
+				'description' => 'ImageMagick 6.x (Imagick 3.7.x) - Limited AVIF support',
+				'quality_method' => 'setImageCompressionQuality',
+				'speed_support' => false,
+				'recommended_speed' => 6,
+				'recommended_quality' => 70,
+				'notes' => 'AVIF support is patchy. Speed settings may be ignored, leading to slow processing (5-10 seconds per image).',
+			],
+			'7.0.x' => [
+				'description' => 'ImageMagick 7.0.x (Early AVIF support)',
+				'quality_method' => 'setImageCompressionQuality',
+				'speed_support' => false,
+				'recommended_speed' => 6,
+				'recommended_quality' => 70,
+				'notes' => 'Early AVIF implementations may ignore quality/speed settings, leading to default encoding (often CRF ~10, large files).',
+			],
+			'7.1.0+' => [
+				'description' => 'ImageMagick 7.1.0+ (Reliable AVIF support)',
+				'quality_method' => 'avif:crf',
+				'speed_support' => true,
+				'recommended_speed' => 5,
+				'recommended_quality' => 70,
+				'notes' => 'Full AVIF support with precise CRF control. Speeds 4-6 recommended for web use (balancing size and performance).',
+			],
+		];
 	}
 
 	/**
