@@ -38,11 +38,12 @@ cd "$PLUGIN_DIR"
 
 # Create zip excluding specified directories and files
 zip -r "$ZIP_FILE" . \
-    -x "bin/" \
-    -x "node_modules/" \
-    -x ".git/" \
-    -x ".vscode/" \
+    -x "bin/*" \
+    -x "node_modules/*" \
+    -x ".git/*" \
+    -x ".vscode/*" \
     -x "tests/*" \
+    -x "assets/js/src/*" \
     -x "*.zip" \
     -x ".gitignore" \
     -x "composer.json" \
