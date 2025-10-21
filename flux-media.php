@@ -87,6 +87,9 @@ function flux_media_composer_notice() {
 // Initialize the plugin.
 add_action( 'plugins_loaded', 'flux_media_init' );
 
+// Handle activation redirect.
+add_action( 'admin_init', 'flux_media_activation_redirect' );
+
 /**
  * Initialize the Flux Media plugin.
  *
@@ -103,6 +106,23 @@ function flux_media_init() {
 	// Register WP-CLI commands if WP-CLI is available.
 	if ( defined( 'WP_CLI' ) && WP_CLI ) {
 		WP_CLI::add_command( 'flux-media', 'FluxMedia\App\Console\Commands\FluxMediaCommand' );
+	}
+}
+
+/**
+ * Handle activation redirect to admin page.
+ *
+ * @since 0.1.0
+ */
+function flux_media_activation_redirect() {
+	// Only redirect if transient is set and user has proper capabilities
+	if ( get_transient( 'flux_media_activation_redirect' ) && current_user_can( 'manage_options' ) ) {
+		// Delete the transient
+		delete_transient( 'flux_media_activation_redirect' );
+		
+		// Redirect to admin page
+		wp_redirect( admin_url( 'admin.php?page=flux-media' ) );
+		exit;
 	}
 }
 
@@ -127,6 +147,9 @@ function flux_media_activate() {
 	// Schedule cleanup cron job.
 	wp_schedule_event( time(), 'daily', 'flux_media_cleanup' );
 	
+	// Set transient to redirect to admin page after activation
+	set_transient( 'flux_media_activation_redirect', true, 60 );
+	
 	// TODO: Initialize SaaS API integration with license key validation
 	// This will be implemented when the SaaS service is available
 }
@@ -139,7 +162,8 @@ function flux_media_activate() {
 function flux_media_deactivate() {
 	// Clear scheduled events.
 	wp_clear_scheduled_hook( 'flux_media_cleanup' );
-	
+	wp_clear_scheduled_hook( 'flux_media_bulk_conversion' );
+
 	// Note: We don't drop tables on deactivation to preserve data
 	// Tables will only be dropped on uninstall
 }

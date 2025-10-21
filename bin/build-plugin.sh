@@ -44,7 +44,12 @@ zip -r "$ZIP_FILE" . \
     -x ".vscode/*" \
     -x "tests/*" \
     -x "assets/js/src/*" \
+    -x "assets/js/dist/*.html" \
+    -x "assets/js/dist/*.LICENSE.txt" \
     -x "*.zip" \
+    -x "*.log" \
+    -x "*.xml" \
+    -x "*.lock" \
     -x ".gitignore" \
     -x "composer.json" \
     -x "composer.lock" \
@@ -53,7 +58,11 @@ zip -r "$ZIP_FILE" . \
     -x "webpack.config.js" \
     -x "*.log" \
     -x ".DS_Store" \
-    -x "Thumbs.db"
+    -x "Thumbs.db" \
+    -x "*.phar" \
+    -x "coverage/*" \
+    -x "phpunit.xml" \
+    -x "CONTRIBUTING.md"
 
 echo "✅ Plugin built successfully: $ZIP_FILE"
 echo "📦 File size: $(du -h "$ZIP_FILE" | cut -f1)"
