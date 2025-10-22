@@ -114,13 +114,10 @@ class WordPressProvider {
      * @return void
      */
     public function register_hooks() {
-        // ===== CONVERT IMAGE =====
-        // Image upload hooks
-        add_action( 'add_attachment', [ $this, 'handle_image_upload' ] );
+        // ===== CONVERT MEDIA =====
+        // Media upload hooks (handles both images and videos)
+        add_action( 'add_attachment', [ $this, 'handle_media_upload' ] );
         add_action( 'wp_generate_attachment_metadata', [ $this, 'handle_image_metadata_generation' ], 10, 2 );
-        
-        // Video upload hooks
-        add_action( 'add_attachment', [ $this, 'handle_video_upload' ] );
         
         // Ensure conversions run when attachments are edited or files are replaced
         add_filter( 'wp_update_attachment_metadata', [ $this, 'handle_update_attachment_metadata' ], 10, 2 );
@@ -167,65 +164,35 @@ class WordPressProvider {
     }
 
     /**
-     * Handle image upload.
+     * Handle media upload (images and videos).
      *
      * @since 0.1.0
      * @param int $attachment_id Attachment ID.
      * @return void
      */
-    public function handle_image_upload( $attachment_id ) {
-        // Check if auto-conversion is enabled
-        if ( ! Settings::is_image_auto_convert_enabled() ) {
-            return;
-        }
-
+    public function handle_media_upload( $attachment_id ) {
         // Check if conversion is disabled for this attachment
         if ( get_post_meta( $attachment_id, '_flux_media_conversion_disabled', true ) ) {
             return;
         }
 
         $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! file_exists( $file_path ) ) {
+        if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
             return;
         }
 
-        // Check if it's an image
-        if ( ! $this->image_converter->is_supported_image( $file_path ) ) {
-            return;
+        // Determine file type and process accordingly
+        if ( $this->image_converter->is_supported_image( $file_path ) ) {
+            // Check if image auto-conversion is enabled
+            if ( Settings::is_image_auto_convert_enabled() ) {
+                $this->process_image_conversion( $attachment_id, $file_path );
+            }
+        } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
+            // Check if video auto-conversion is enabled
+            if ( Settings::is_video_auto_convert_enabled() ) {
+                $this->process_video_conversion( $attachment_id, $file_path );
+            }
         }
-
-        $this->process_image_conversion( $attachment_id, $file_path );
-    }
-
-    /**
-     * Handle video upload.
-     *
-     * @since 0.1.0
-     * @param int $attachment_id Attachment ID.
-     * @return void
-     */
-    public function handle_video_upload( $attachment_id ) {
-        // Check if auto-conversion is enabled
-        if ( ! Settings::is_video_auto_convert_enabled() ) {
-            return;
-        }
-
-        // Check if conversion is disabled for this attachment
-        if ( get_post_meta( $attachment_id, '_flux_media_conversion_disabled', true ) ) {
-            return;
-        }
-
-        $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! file_exists( $file_path ) ) {
-            return;
-        }
-
-        // Check if it's a video
-        if ( ! $this->video_converter->is_supported_video( $file_path ) ) {
-            return;
-        }
-
-        $this->process_video_conversion( $attachment_id, $file_path );
     }
 
     /**
@@ -291,14 +258,22 @@ class WordPressProvider {
 
         // Handle results
         if ( $results['success'] ) {
+            // Initialize WordPress filesystem for file operations
+            if ( ! function_exists( 'WP_Filesystem' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+            }
+            WP_Filesystem();
+            
+            global $wp_filesystem;
+            
             // Get original file size
-            $original_size = file_exists( $file_path ) ? filesize( $file_path ) : 0;
+            $original_size = $wp_filesystem && $wp_filesystem->exists( $file_path ) ? $wp_filesystem->size( $file_path ) : 0;
 
             // Record conversion with file size data for each format
             // Quota tracking is handled automatically in record_conversion()
             foreach ( $results['converted_formats'] as $format ) {
                 $converted_file_path = $results['converted_files'][ $format ] ?? '';
-                $converted_size = file_exists( $converted_file_path ) ? filesize( $converted_file_path ) : 0;
+                $converted_size = $wp_filesystem && $wp_filesystem->exists( $converted_file_path ) ? $wp_filesystem->size( $converted_file_path ) : 0;
                 
                 $this->conversion_tracker->record_conversion( $attachment_id, $format, $original_size, $converted_size );
             }
@@ -331,8 +306,8 @@ class WordPressProvider {
 
         // Get settings from WordPress
         $settings = [
-            'video_av1_crf' => Settings::get_av1_crf(),
-            'video_webm_crf' => Settings::get_webm_crf(),
+            'video_av1_crf' => Settings::get_video_av1_crf(),
+            'video_webm_crf' => Settings::get_video_webm_crf(),
         ];
 
         // Create destination paths for requested formats
@@ -348,14 +323,22 @@ class WordPressProvider {
 
         // Handle results
         if ( $results['success'] ) {
+            // Initialize WordPress filesystem for file operations
+            if ( ! function_exists( 'WP_Filesystem' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+            }
+            WP_Filesystem();
+            
+            global $wp_filesystem;
+            
             // Get original file size
-            $original_size = file_exists( $file_path ) ? filesize( $file_path ) : 0;
+            $original_size = $wp_filesystem && $wp_filesystem->exists( $file_path ) ? $wp_filesystem->size( $file_path ) : 0;
 
             // Record conversion with file size data for each format
             // Quota tracking is handled automatically in record_conversion()
             foreach ( $results['converted_formats'] as $format ) {
                 $converted_file_path = $results['converted_files'][ $format ] ?? '';
-                $converted_size = file_exists( $converted_file_path ) ? filesize( $converted_file_path ) : 0;
+                $converted_size = $wp_filesystem && $wp_filesystem->exists( $converted_file_path ) ? $wp_filesystem->size( $converted_file_path ) : 0;
                 
                 $this->conversion_tracker->record_conversion( $attachment_id, $format, $original_size, $converted_size );
             }
@@ -385,11 +368,19 @@ class WordPressProvider {
             return;
         }
 
+        // Initialize WordPress filesystem
+        if ( ! function_exists( 'WP_Filesystem' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        WP_Filesystem();
+        
+        global $wp_filesystem;
+        
         $deleted_count = 0;
         $total_count = count( $converted_files );
 
         foreach ( $converted_files as $format => $file_path ) {
-            if ( file_exists( $file_path ) && wp_delete_file( $file_path ) ) {
+            if ( $wp_filesystem && $wp_filesystem->exists( $file_path ) && $wp_filesystem->delete( $file_path ) ) {
                 $deleted_count++;
                 $this->logger->info( "Deleted converted file: {$file_path} (format: {$format})" );
             } else {
@@ -455,11 +446,19 @@ class WordPressProvider {
             return true; // Nothing to delete
         }
 
+        // Initialize WordPress filesystem
+        if ( ! function_exists( 'WP_Filesystem' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        WP_Filesystem();
+        
+        global $wp_filesystem;
+        
         $deleted_count = 0;
         $total_count = count( $converted_files );
 
         foreach ( $converted_files as $format => $file_path ) {
-            if ( file_exists( $file_path ) && wp_delete_file( $file_path ) ) {
+            if ( $wp_filesystem && $wp_filesystem->exists( $file_path ) && $wp_filesystem->delete( $file_path ) ) {
                 $deleted_count++;
                 $this->logger->info( "Deleted converted file: {$file_path} (format: {$format})" );
             } else {
@@ -548,10 +547,10 @@ class WordPressProvider {
      */
     public function convert_attachment( $attachment_id ) {
         $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! file_exists( $file_path ) ) {
+        if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
             return [
                 'success' => false,
-                'errors' => ['Attachment file not found'],
+                'errors' => ['Attachment file not found or invalid'],
             ];
         }
 
@@ -721,7 +720,7 @@ class WordPressProvider {
             return $override;
         }
 
-        if ( ! $filename || ! file_exists( $filename ) ) {
+        if ( ! $filename || ! wp_check_filetype( $filename )['ext'] ) {
             return $override;
         }
 
@@ -750,13 +749,19 @@ class WordPressProvider {
         }
 
         $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! file_exists( $file_path ) ) {
+        if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
             return $data;
         }
 
-        // Only process supported images
+        // Process based on file type
         if ( $this->image_converter->is_supported_image( $file_path ) ) {
-            $this->process_image_conversion( $attachment_id, $file_path );
+            if ( Settings::is_image_auto_convert_enabled() ) {
+                $this->process_image_conversion( $attachment_id, $file_path );
+            }
+        } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
+            if ( Settings::is_video_auto_convert_enabled() ) {
+                $this->process_video_conversion( $attachment_id, $file_path );
+            }
         }
 
         return $data;
@@ -779,13 +784,19 @@ class WordPressProvider {
             return $file;
         }
 
-        if ( ! $file || ! file_exists( $file ) ) {
+        if ( ! $file || ! wp_check_filetype( $file )['ext'] ) {
             return $file;
         }
 
-        // Only process supported images
+        // Process based on file type
         if ( $this->image_converter->is_supported_image( $file ) ) {
-            $this->process_image_conversion( $attachment_id, $file );
+            if ( Settings::is_image_auto_convert_enabled() ) {
+                $this->process_image_conversion( $attachment_id, $file );
+            }
+        } elseif ( $this->video_converter->is_supported_video( $file ) ) {
+            if ( Settings::is_video_auto_convert_enabled() ) {
+                $this->process_video_conversion( $attachment_id, $file );
+            }
         }
 
         return $file;

@@ -293,7 +293,7 @@ class VideoConverter implements Converter {
      * @return bool True if supported, false otherwise.
      */
     public function is_supported_video( $file_path ) {
-        $extension = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+        $extension = strtolower( wp_check_filetype( $file_path )['ext'] ?? '' );
         $supported_extensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'ogg'];
         return in_array( $extension, $supported_extensions, true );
     }
@@ -333,18 +333,32 @@ class VideoConverter implements Converter {
      * @return bool True on success, false on failure.
      */
     public function cleanup_temp_files( $temp_dir ) {
-        if ( ! is_dir( $temp_dir ) ) {
+        // Initialize WordPress filesystem
+        if ( ! function_exists( 'WP_Filesystem' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        WP_Filesystem();
+        
+        global $wp_filesystem;
+        if ( ! $wp_filesystem ) {
+            return false;
+        }
+
+        if ( ! $wp_filesystem->is_dir( $temp_dir ) ) {
             return true;
         }
 
-        $files = glob( $temp_dir . '/*' );
+        $files = $wp_filesystem->dirlist( $temp_dir );
         $success = true;
 
-        foreach ( $files as $file ) {
-            if ( is_file( $file ) ) {
-                if ( ! wp_delete_file( $file ) ) {
-                    $this->logger->warning( "Failed to delete temporary file: {$file}" );
-                    $success = false;
+        if ( $files ) {
+            foreach ( $files as $file ) {
+                $file_path = $temp_dir . '/' . $file['name'];
+                if ( $file['type'] === 'f' ) {
+                    if ( ! $wp_filesystem->delete( $file_path ) ) {
+                        $this->logger->warning( "Failed to delete temporary file: {$file_path}" );
+                        $success = false;
+                    }
                 }
             }
         }
@@ -370,8 +384,8 @@ class VideoConverter implements Converter {
         ];
 
         // Validate source file
-        if ( ! file_exists( $source_path ) ) {
-            $results['errors'][] = 'Source file not found';
+        if ( ! wp_check_filetype( $source_path )['ext'] ) {
+            $results['errors'][] = 'Source file not found or invalid';
             return $results;
         }
 
@@ -381,38 +395,40 @@ class VideoConverter implements Converter {
             return $results;
         }
 
+        // Initialize WordPress filesystem
+        if ( ! function_exists( 'WP_Filesystem' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        WP_Filesystem();
+        
+        global $wp_filesystem;
+        if ( ! $wp_filesystem ) {
+            $results['errors'][] = 'WordPress filesystem not available';
+            return $results;
+        }
+
         // Validate destination paths and write permissions
         foreach ( $destination_paths as $format => $destination_path ) {
             $destination_dir = dirname( $destination_path );
             
             // Check if destination directory exists and is writable
-            if ( ! is_dir( $destination_dir ) ) {
+            if ( ! $wp_filesystem->is_dir( $destination_dir ) ) {
                 $results['errors'][] = "Destination directory does not exist: {$destination_dir}";
                 continue;
             }
             
-            // Initialize WordPress filesystem
-            if ( ! function_exists( 'WP_Filesystem' ) ) {
-                require_once ABSPATH . 'wp-admin/includes/file.php';
-            }
-            WP_Filesystem();
-            
-            global $wp_filesystem;
-            if ( ! $wp_filesystem || ! $wp_filesystem->is_writable( $destination_dir ) ) {
+            if ( ! $wp_filesystem->is_writable( $destination_dir ) ) {
                 $results['errors'][] = "Destination directory is not writable: {$destination_dir}";
                 continue;
             }
             
             // If file already exists, check if we can write to it
-            if ( file_exists( $destination_path ) ) {
+            if ( $wp_filesystem->exists( $destination_path ) ) {
                 if ( ! $wp_filesystem->is_writable( $destination_path ) ) {
                     $results['errors'][] = "Destination file exists but is not writable: {$destination_path}";
                     continue;
                 }
             }
-            
-            // Log successful validation
-            $this->logger->debug( "Destination path validated for {$format}: {$destination_path}" );
         }
         
         // If any destination paths failed validation, return early
@@ -610,20 +626,13 @@ class VideoConverter implements Converter {
             return false;
         }
 
-        if ( ! file_exists( $this->source_path ) ) {
-            $this->add_error( "Source file does not exist: {$this->source_path}" );
+        if ( ! wp_check_filetype( $this->source_path )['ext'] ) {
+            $this->add_error( "Source file does not exist or is invalid: {$this->source_path}" );
             return false;
         }
 
         if ( empty( $this->destination_path ) ) {
             $this->add_error( 'Destination path is required' );
-            return false;
-        }
-
-        // Check if destination directory exists and is writable
-        $destination_dir = dirname( $this->destination_path );
-        if ( ! is_dir( $destination_dir ) ) {
-            $this->add_error( "Destination directory does not exist: {$destination_dir}" );
             return false;
         }
 
@@ -634,7 +643,19 @@ class VideoConverter implements Converter {
         WP_Filesystem();
         
         global $wp_filesystem;
-        if ( ! $wp_filesystem || ! $wp_filesystem->is_writable( $destination_dir ) ) {
+        if ( ! $wp_filesystem ) {
+            $this->add_error( 'WordPress filesystem not available' );
+            return false;
+        }
+
+        // Check if destination directory exists and is writable
+        $destination_dir = dirname( $this->destination_path );
+        if ( ! $wp_filesystem->is_dir( $destination_dir ) ) {
+            $this->add_error( "Destination directory does not exist: {$destination_dir}" );
+            return false;
+        }
+
+        if ( ! $wp_filesystem->is_writable( $destination_dir ) ) {
             $this->add_error( "Destination directory is not writable: {$destination_dir}" );
             return false;
         }
@@ -660,7 +681,8 @@ class VideoConverter implements Converter {
      * @return string|null Target format or null if unable to determine.
      */
     private function get_target_format() {
-        $extension = strtolower( pathinfo( $this->destination_path, PATHINFO_EXTENSION ) );
+        $filetype = wp_check_filetype( $this->destination_path );
+        $extension = strtolower( $filetype['ext'] ?? '' );
         
         switch ( $extension ) {
             case Converter::FORMAT_AV1:

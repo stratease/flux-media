@@ -69,8 +69,8 @@ class ProcessorDetector {
     public function get_available_video_processors() {
         $processors = [];
 
-        // Check FFmpeg
-        if ( $this->is_ffmpeg_available() ) {
+        // Check FFmpeg binary AND PHP-FFmpeg library
+        if ( $this->is_ffmpeg_available() && $this->is_php_ffmpeg_available() ) {
             $processors[ ProcessorTypes::VIDEO_FFMPEG ] = [
                 'available' => true,
                 'type' => ProcessorTypes::VIDEO_FFMPEG,
@@ -152,6 +152,16 @@ class ProcessorDetector {
      */
     public function is_ffmpeg_available() {
         return $this->is_ffmpeg_binary_available();
+    }
+
+    /**
+     * Check if PHP-FFmpeg library is available.
+     *
+     * @since 0.1.0
+     * @return bool True if PHP-FFmpeg library is available, false otherwise.
+     */
+    public function is_php_ffmpeg_available() {
+        return class_exists( 'FluxMedia\FFMpeg\FFMpeg' );
     }
 
     /**

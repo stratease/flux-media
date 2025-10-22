@@ -199,8 +199,8 @@ const SettingsPage = () => {
           </Box>
         </Grid>
 
-        {/* Video Settings - Hidden for MVP */}
-        {/* <Grid item xs={12} md={6}>
+        {/* Video Settings */}
+        <Grid item xs={12} md={6}>
           <Box>
             <Typography variant="h5" gutterBottom>
               {__('Video Settings', 'flux-media')}
@@ -209,12 +209,26 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings.video_formats?.includes('av1')}
+                    checked={settings?.video_auto_convert}
+                    disabled={isLoading}
+                    onChange={handleSettingChange('video_auto_convert')}
+                  />
+                }
+                label={__('Auto-convert videos on upload', 'flux-media')}
+              />
+              
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings?.video_formats?.includes('av1')}
+                    disabled={isLoading}
                     onChange={(e) => {
                       const newFormats = e.target.checked 
-                        ? [...(settings.video_formats || []).filter(f => f !== 'av1'), 'av1']
-                        : (settings.video_formats || []).filter(f => f !== 'av1');
-                      handleSettingChange('video_formats')({ target: { value: newFormats } });
+                        ? [...(settings?.video_formats || []).filter(f => f !== 'av1'), 'av1']
+                        : (settings?.video_formats || []).filter(f => f !== 'av1');
+                      
+                      // Save only the video_formats field
+                      debouncedSave({ video_formats: newFormats });
                     }}
                   />
                 }
@@ -224,12 +238,15 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings.video_formats?.includes('webm')}
+                    checked={settings?.video_formats?.includes('webm')}
+                    disabled={isLoading}
                     onChange={(e) => {
                       const newFormats = e.target.checked 
-                        ? [...(settings.video_formats || []).filter(f => f !== 'webm'), 'webm']
-                        : (settings.video_formats || []).filter(f => f !== 'webm');
-                      handleSettingChange('video_formats')({ target: { value: newFormats } });
+                        ? [...(settings?.video_formats || []).filter(f => f !== 'webm'), 'webm']
+                        : (settings?.video_formats || []).filter(f => f !== 'webm');
+                      
+                      // Save only the video_formats field
+                      debouncedSave({ video_formats: newFormats });
                     }}
                   />
                 }
@@ -237,7 +254,7 @@ const SettingsPage = () => {
               />
             </Stack>
           </Box>
-        </Grid> */}
+        </Grid>
 
         {/* Image Quality Settings */}
         <Grid item xs={12} md={6}>
@@ -306,8 +323,7 @@ const SettingsPage = () => {
           </Box>
         </Grid>
 
-        {/* Video Quality Settings - Hidden for MVP */}
-        {/*
+        {/* Video Quality Settings */}
         <Grid item xs={12} md={6}>
           <Divider sx={{ my: 2 }} />
           <Box>
@@ -320,13 +336,14 @@ const SettingsPage = () => {
                   {__('AV1 CRF (Constant Rate Factor)', 'flux-media')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {__('Current:', 'flux-media')} {settings.video_av1_crf} ({__('Lower values = higher quality, larger files', 'flux-media')})
+                  {__('Current:', 'flux-media')} {settings?.video_av1_crf} ({__('Lower values = higher quality, larger files', 'flux-media')})
                 </Typography>
                 <input
                   type="range"
                   min="18"
                   max="50"
-                  value={settings.video_av1_crf}
+                  value={settings?.video_av1_crf}
+                  disabled={isLoading}
                   onChange={handleSettingChange('video_av1_crf')}
                   style={{ width: '100%' }}
                 />
@@ -337,13 +354,14 @@ const SettingsPage = () => {
                   {__('WebM CRF (Constant Rate Factor)', 'flux-media')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {__('Current:', 'flux-media')} {settings.video_webm_crf} ({__('Lower values = higher quality, larger files', 'flux-media')})
+                  {__('Current:', 'flux-media')} {settings?.video_webm_crf} ({__('Lower values = higher quality, larger files', 'flux-media')})
                 </Typography>
                 <input
                   type="range"
                   min="18"
                   max="50"
-                  value={settings.video_webm_crf}
+                  value={settings?.video_webm_crf}
+                  disabled={isLoading}
                   onChange={handleSettingChange('video_webm_crf')}
                   style={{ width: '100%' }}
                 />
@@ -354,10 +372,11 @@ const SettingsPage = () => {
                   {__('AV1 Preset', 'flux-media')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {__('Current:', 'flux-media')} {settings.video_av1_preset} ({__('Faster presets = larger files, slower presets = smaller files', 'flux-media')})
+                  {__('Current:', 'flux-media')} {settings?.video_av1_preset} ({__('Faster presets = larger files, slower presets = smaller files', 'flux-media')})
                 </Typography>
                 <select
-                  value={settings.video_av1_preset}
+                  value={settings?.video_av1_preset}
+                  disabled={isLoading}
                   onChange={handleSettingChange('video_av1_preset')}
                   style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
                 >
@@ -378,10 +397,11 @@ const SettingsPage = () => {
                   {__('WebM Preset', 'flux-media')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {__('Current:', 'flux-media')} {settings.video_webm_preset} ({__('Faster presets = larger files, slower presets = smaller files', 'flux-media')})
+                  {__('Current:', 'flux-media')} {settings?.video_webm_preset} ({__('Faster presets = larger files, slower presets = smaller files', 'flux-media')})
                 </Typography>
                 <select
-                  value={settings.video_webm_preset}
+                  value={settings?.video_webm_preset}
+                  disabled={isLoading}
                   onChange={handleSettingChange('video_webm_preset')}
                   style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
                 >
@@ -399,7 +419,6 @@ const SettingsPage = () => {
             </Stack>
           </Box>
         </Grid>
-        */}
 
         {/* License Settings */}
         <Grid item xs={12}>

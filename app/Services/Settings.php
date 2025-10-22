@@ -286,6 +286,26 @@ class Settings {
 	}
 
 	/**
+	 * Get video AV1 preset setting.
+	 *
+	 * @since 0.1.0
+	 * @return string AV1 preset value.
+	 */
+	public static function get_video_av1_preset() {
+		return (string) self::get( 'video_av1_preset', self::DEFAULT_VIDEO_AV1_PRESET );
+	}
+
+	/**
+	 * Get video WebM preset setting.
+	 *
+	 * @since 0.1.0
+	 * @return string WebM preset value.
+	 */
+	public static function get_video_webm_preset() {
+		return (string) self::get( 'video_webm_preset', self::DEFAULT_VIDEO_WEBM_PRESET );
+	}
+
+	/**
 	 * Get image formats setting.
 	 *
 	 * @since 0.1.0

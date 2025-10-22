@@ -1,7 +1,7 @@
 import React from 'react';
 import { Grid, Typography, Box } from '@mui/material';
 import { __ } from '@wordpress/i18n';
-import { SystemStatusCard, QuotaProgressCard } from '@flux-media/components';
+import { ImageStatusCard, VideoStatusCard, PHPConfigurationCard, QuotaProgressCard } from '@flux-media/components';
 import { useSystemStatus } from '@flux-media/hooks/useSystemStatus';
 import { useQuotaProgress } from '@flux-media/hooks/useQuotaProgress';
 import { useConversions } from '@flux-media/hooks/useConversions';
@@ -34,20 +34,26 @@ const OverviewPage = () => {
     <Box>
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
-          <SystemStatusCard 
+          <ImageStatusCard 
             status={systemStatus} 
             loading={systemLoading}
           />
         </Grid>
         
-        {/* Temporarily hidden quota section */}
-        {/* <Grid item xs={12} md={6}>
-          <QuotaProgressCard 
-            quota={quotaData} 
-            loading={quotaLoading}
+        <Grid item xs={12} md={6}>
+          <VideoStatusCard 
+            status={systemStatus} 
+            loading={systemLoading}
           />
-        </Grid> */}
-      </Grid>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          {/* PHP Configuration Section */}   
+          <PHPConfigurationCard 
+            status={systemStatus} 
+            loading={systemLoading}
+          />
+        </Grid>
+      </Grid>   
 
       {/* Conversion Savings Section - without Paper wrapper */}
       {!conversionsLoading && getSavingsStats() && (
