@@ -369,7 +369,7 @@ class FFmpegProcessor implements VideoProcessorInterface {
 			// Create WebM format
 			$format = new WebM();
 			$format->setVideoCodec( 'libvpx-vp9' );
-			$format->setAudioCodec( 'libopus' );
+			$format->setAudioCodec( 'libvorbis' );
 			$format->setAudioKiloBitrate( 128 );
 			
 			// Set WebM-specific parameters

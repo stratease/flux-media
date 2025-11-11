@@ -105,6 +105,7 @@ class VideoConverter implements Converter {
      */
     private function get_available_processor() {
         // Check if PHP-FFmpeg library is available
+
         if ( ! class_exists( 'FluxMedia\FFMpeg\FFMpeg' ) ) {
             $this->logger->log_processor_unavailable( 'PHP-FFmpeg', 'PHP-FFmpeg library not found' );
             return null;
@@ -444,10 +445,10 @@ class VideoConverter implements Converter {
             $conversion_options = [];
 
             $success = false;
-            if ( Converter::FORMAT_AV1 === $format ) {
+            if ( Converter::FORMAT_AV1 === $format && $this->can_convert_to_av1() ) {
                 $conversion_options = ['crf' => $settings['video_av1_crf']];
                 $success = $this->convert_to_av1( $source_path, $destination_path, $conversion_options );
-            } elseif ( Converter::FORMAT_WEBM === $format ) {
+            } elseif ( Converter::FORMAT_WEBM === $format && $this->can_convert_to_webm() ) {
                 $conversion_options = ['crf' => $settings['video_webm_crf']];
                 $success = $this->convert_to_webm( $source_path, $destination_path, $conversion_options );
             }

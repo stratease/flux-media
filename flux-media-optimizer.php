@@ -18,6 +18,8 @@
  * @since 0.1.0
  */
 
+use FluxMedia\App\Services\FFmpegAutoloader;
+
 // Prevent direct access.
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -62,11 +64,14 @@ function flux_media_php_version_notice() {
 if ( file_exists( FLUX_MEDIA_PLUGIN_DIR . 'vendor/autoload.php' )
 	&& file_exists( FLUX_MEDIA_PLUGIN_DIR . 'vendor-prefixed/autoload.php' ) ) {
 	require_once FLUX_MEDIA_PLUGIN_DIR . 'vendor/autoload.php';
-	require_once FLUX_MEDIA_PLUGIN_DIR . 'vendor-prefixed/autoload.php';	
+	require_once FLUX_MEDIA_PLUGIN_DIR . 'vendor-prefixed/autoload.php';
 } else {
 	add_action( 'admin_notices', 'flux_media_composer_notice' );
 	return;
 }
+
+// Initialize custom FFmpeg autoloader.
+FFmpegAutoloader::init();
 
 /**
  * Display Composer dependencies notice.
