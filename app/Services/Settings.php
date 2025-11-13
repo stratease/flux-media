@@ -31,8 +31,8 @@ class Settings {
 	 * @since 0.1.0
 	 */
 	const DEFAULT_AVIF_SPEED = 5;
-	const DEFAULT_VIDEO_AV1_PRESET = 'medium';
-	const DEFAULT_VIDEO_WEBM_PRESET = 'medium';
+	const DEFAULT_VIDEO_AV1_CPU_USED = 4; // 0-8, where lower = slower but better compression
+	const DEFAULT_VIDEO_WEBM_SPEED = 4; // 0-9, where lower = slower but better compression
 
 	/**
 	 * Default format arrays.
@@ -50,6 +50,7 @@ class Settings {
 	const DEFAULT_IMAGE_AUTO_CONVERT = true;
 	const DEFAULT_VIDEO_AUTO_CONVERT = true;
 	const DEFAULT_HYBRID_APPROACH = false;
+	const DEFAULT_VIDEO_HYBRID_APPROACH = false;
 	const DEFAULT_BULK_CONVERSION_ENABLED = false;
 
 	/**
@@ -83,15 +84,16 @@ class Settings {
 			'image_avif_speed' => self::DEFAULT_AVIF_SPEED,
 			'image_auto_convert' => self::DEFAULT_IMAGE_AUTO_CONVERT,
 			'image_formats' => self::DEFAULT_IMAGE_FORMATS,
-			'hybrid_approach' => self::DEFAULT_HYBRID_APPROACH,
+			'image_hybrid_approach' => self::DEFAULT_HYBRID_APPROACH,
 
 			// Video conversion settings.
 			'video_av1_crf' => self::DEFAULT_VIDEO_AV1_CRF,
-			'video_av1_preset' => self::DEFAULT_VIDEO_AV1_PRESET,
+			'video_av1_cpu_used' => self::DEFAULT_VIDEO_AV1_CPU_USED,
 			'video_webm_crf' => self::DEFAULT_VIDEO_WEBM_CRF,
-			'video_webm_preset' => self::DEFAULT_VIDEO_WEBM_PRESET,
+			'video_webm_speed' => self::DEFAULT_VIDEO_WEBM_SPEED,
 			'video_auto_convert' => self::DEFAULT_VIDEO_AUTO_CONVERT,
 			'video_formats' => self::DEFAULT_VIDEO_FORMATS,
+			'video_hybrid_approach' => self::DEFAULT_VIDEO_HYBRID_APPROACH,
 
 			// General settings.
 			'bulk_conversion_enabled' => self::DEFAULT_BULK_CONVERSION_ENABLED,
@@ -286,23 +288,31 @@ class Settings {
 	}
 
 	/**
-	 * Get video AV1 preset setting.
+	 * Get video AV1 CPU used setting.
 	 *
-	 * @since 0.1.0
-	 * @return string AV1 preset value.
+	 * Validates and clamps the value to valid range (0-8).
+	 *
+	 * @since 1.0.0
+	 * @return int AV1 CPU used (0-8).
 	 */
-	public static function get_video_av1_preset() {
-		return (string) self::get( 'video_av1_preset', self::DEFAULT_VIDEO_AV1_PRESET );
+	public static function get_video_av1_cpu_used() {
+		$cpu_used = (int) self::get( 'video_av1_cpu_used', self::DEFAULT_VIDEO_AV1_CPU_USED );
+		// Clamp to valid range: 0-8, where lower = slower but better compression
+		return max( 0, min( 8, $cpu_used ) );
 	}
 
 	/**
-	 * Get video WebM preset setting.
+	 * Get video WebM speed setting.
 	 *
-	 * @since 0.1.0
-	 * @return string WebM preset value.
+	 * Validates and clamps the value to valid range (0-9).
+	 *
+	 * @since 1.0.0
+	 * @return int WebM speed (0-9).
 	 */
-	public static function get_video_webm_preset() {
-		return (string) self::get( 'video_webm_preset', self::DEFAULT_VIDEO_WEBM_PRESET );
+	public static function get_video_webm_speed() {
+		$speed = (int) self::get( 'video_webm_speed', self::DEFAULT_VIDEO_WEBM_SPEED );
+		// Clamp to valid range: 0-9, where lower = slower but better compression
+		return max( 0, min( 9, $speed ) );
 	}
 
 	/**
@@ -326,13 +336,23 @@ class Settings {
 	}
 
 	/**
-	 * Check if hybrid approach is enabled.
+	 * Check if image hybrid approach is enabled.
 	 *
-	 * @since 0.1.0
-	 * @return bool True if hybrid approach is enabled.
+	 * @since 1.0.0
+	 * @return bool True if image hybrid approach is enabled.
 	 */
-	public static function is_hybrid_approach_enabled() {
-		return (bool) self::get( 'hybrid_approach', self::DEFAULT_HYBRID_APPROACH );
+	public static function is_image_hybrid_approach_enabled() {
+		return (bool) self::get( 'image_hybrid_approach', self::DEFAULT_HYBRID_APPROACH );
+	}
+
+	/**
+	 * Check if video hybrid approach is enabled.
+	 *
+	 * @since 1.0.0
+	 * @return bool True if video hybrid approach is enabled.
+	 */
+	public static function is_video_hybrid_approach_enabled() {
+		return (bool) self::get( 'video_hybrid_approach', self::DEFAULT_VIDEO_HYBRID_APPROACH );
 	}
 
 	/**

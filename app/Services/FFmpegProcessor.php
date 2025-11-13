@@ -10,6 +10,8 @@ namespace FluxMedia\App\Services;
 
 use FluxMedia\App\Services\VideoProcessorInterface;
 use FluxMedia\App\Services\LoggerInterface;
+use FluxMedia\App\Services\ProcessorDetector;
+use FluxMedia\App\Services\ProcessorTypes;
 use FluxMedia\FFMpeg\FFMpeg;
 use FluxMedia\FFMpeg\FFProbe;
 use FluxMedia\FFMpeg\Format\Video\WebM;
@@ -32,6 +34,14 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	private $logger;
 
 	/**
+	 * Processor detector instance.
+	 *
+	 * @since 1.0.0
+	 * @var ProcessorDetector
+	 */
+	private $detector;
+
+	/**
 	 * FFMpeg instance.
 	 *
 	 * @since 0.1.0
@@ -50,155 +60,76 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	/**
 	 * Constructor.
 	 *
-	 * @since 0.1.0
-	 * @param LoggerInterface $logger Logger instance.
+	 * @since 1.0.0
+	 * @param LoggerInterface   $logger Logger instance.
+	 * @param ProcessorDetector $detector Optional processor detector instance.
 	 */
-	public function __construct( LoggerInterface $logger ) {
+	public function __construct( LoggerInterface $logger, ProcessorDetector $detector ) {
 		$this->logger = $logger;
+		$this->detector = $detector ? $detector : new ProcessorDetector();
 		$this->initialize_ffmpeg();
 	}
 
 	/**
 	 * Initialize FFMpeg and FFProbe instances.
 	 *
-	 * @since 0.1.0
+	 * Uses ProcessorDetector to check availability before initializing.
+	 * The PHP-FFmpeg library handles binary detection automatically.
+	 *
+	 * @since 1.0.0
 	 */
 	private function initialize_ffmpeg() {
+		// Check if FFmpeg is available using ProcessorDetector
+		if ( ! $this->detector->is_ffmpeg_available() ) {
+			// Don't log as error - this is expected in many environments
+			$this->ffmpeg = null;
+			$this->ffprobe = null;
+			return;
+		}
+
 		try {
-			$ffmpeg_path = $this->find_ffmpeg_binary();
-			$ffprobe_path = $this->find_ffprobe_binary();
-
-			// Check if binaries are actually available before trying to create instances
-			if ( ! $this->is_executable( $ffmpeg_path ) ) {
-				// Don't log as error - this is expected in many environments
-				$this->ffmpeg = null;
-				$this->ffprobe = null;
-				return;
-			}
-
-			if ( ! $this->is_executable( $ffprobe_path ) ) {
-				// Don't log as error - this is expected in many environments
-				$this->ffmpeg = null;
-				$this->ffprobe = null;
-				return;
-			}
-
+			// Let PHP-FFmpeg library auto-detect binaries (same approach as ProcessorDetector)
 			$this->ffmpeg = FFMpeg::create([
-				'ffmpeg.binaries'  => $ffmpeg_path,
-				'ffprobe.binaries' => $ffprobe_path,
-				'timeout'          => 3600, // 1 hour timeout
-				'ffmpeg.threads'   => 0, // Use all available threads
+				'timeout'        => 3600, // 1 hour timeout
+				'ffmpeg.threads' => 0, // Use all available threads
 			]);
 
-			$this->ffprobe = FFProbe::create([
-				'ffprobe.binaries' => $ffprobe_path,
-			]);
-
-			// FFmpeg initialized successfully
+			$this->ffprobe = FFProbe::create();
 
 		} catch ( RuntimeException $e ) {
-			// Don't log as error - this is expected when binaries aren't available
+			$this->logger->error( "Failed to initialize FFmpeg: {$e->getMessage()}" );
 			$this->ffmpeg = null;
 			$this->ffprobe = null;
 		} catch ( \Exception $e ) {
-			// Don't log as error - this is expected when binaries aren't available
+			$this->logger->error( "Failed to initialize FFmpeg: {$e->getMessage()}" );
 			$this->ffmpeg = null;
 			$this->ffprobe = null;
 		}
 	}
 
-	/**
-	 * Find FFmpeg binary path.
-	 *
-	 * @since 0.1.0
-	 * @return string FFmpeg binary path.
-	 */
-	private function find_ffmpeg_binary() {
-		// Check common locations.
-		$possible_paths = [
-			'ffmpeg',
-			'/usr/bin/ffmpeg',
-			'/usr/local/bin/ffmpeg',
-			'/opt/homebrew/bin/ffmpeg',
-		];
-
-		foreach ( $possible_paths as $path ) {
-			if ( $this->is_executable( $path ) ) {
-				return $path;
-			}
-		}
-
-		return 'ffmpeg'; // Fallback to PATH.
-	}
-
-	/**
-	 * Find FFprobe binary path.
-	 *
-	 * @since 0.1.0
-	 * @return string FFprobe binary path.
-	 */
-	private function find_ffprobe_binary() {
-		// Check common locations.
-		$possible_paths = [
-			'ffprobe',
-			'/usr/bin/ffprobe',
-			'/usr/local/bin/ffprobe',
-			'/opt/homebrew/bin/ffprobe',
-		];
-
-		foreach ( $possible_paths as $path ) {
-			if ( $this->is_executable( $path ) ) {
-				return $path;
-			}
-		}
-
-		return 'ffprobe'; // Fallback to PATH.
-	}
-
-	/**
-	 * Check if binary is executable.
-	 *
-	 * @since 0.1.0
-	 * @param string $path Binary path.
-	 * @return bool True if executable, false otherwise.
-	 */
-	private function is_executable( $path ) {
-		// Check if file exists and is executable
-		if ( ! file_exists( $path ) || ! is_executable( $path ) ) {
-			return false;
-		}
-		
-		// Use WordPress-compatible method to check if command works
-		$output = [];
-		$return_var = 0;
-		$result = @exec( escapeshellarg( $path ) . ' -version 2>&1', $output, $return_var );
-		
-		return $return_var === 0;
-	}
 
 	/**
 	 * Get processor information.
 	 *
-	 * @since 0.1.0
+	 * Uses ProcessorDetector to get availability and format support information.
+	 *
+	 * @since 1.0.0
 	 * @return array Processor information.
 	 */
 	public function get_info() {
-		// Always check format support capabilities, regardless of initialization status
-		$av1_support = $this->can_convert_to_av1();
-		$webm_support = $this->can_convert_to_webm();
+		// Get video processors from ProcessorDetector
+		$processors = $this->detector->get_available_video_processors();
 		
-		// Processor is available if we can convert to at least one format
-		$available = $av1_support || $webm_support;
-		
-		if ( $available ) {
+		// Check if FFmpeg processor is available
+		if ( isset( $processors[ ProcessorTypes::VIDEO_FFMPEG ] ) && $processors[ ProcessorTypes::VIDEO_FFMPEG ]['available'] ) {
 			$version_info = $this->get_version_info();
 			
 			return [
 				'available' => true,
 				'type' => 'ffmpeg',
 				'version' => $version_info,
-				'av1_support' => $av1_support,
-				'webm_support' => $webm_support,
+				'av1_support' => $processors[ ProcessorTypes::VIDEO_FFMPEG ]['av1_support'] ?? false,
+				'webm_support' => $processors[ ProcessorTypes::VIDEO_FFMPEG ]['webm_support'] ?? false,
 			];
 		}
 		
@@ -208,48 +139,6 @@ class FFmpegProcessor implements VideoProcessorInterface {
 			'av1_support' => false,
 			'webm_support' => false,
 		];
-	}
-
-	/**
-	 * Check if we can convert to AV1 format.
-	 *
-	 * @since 0.1.0
-	 * @return bool True if AV1 conversion is possible, false otherwise.
-	 */
-	private function can_convert_to_av1() {
-		// Check if PHP-FFmpeg library is available
-		if ( ! class_exists( 'FluxMedia\FFMpeg\FFMpeg' ) ) {
-			return false;
-		}
-		
-		// Check if FFmpeg binary is available
-		if ( ! $this->is_executable( $this->find_ffmpeg_binary() ) ) {
-			return false;
-		}
-		
-		// Check if AV1 codec is supported
-		return $this->supports_av1();
-	}
-
-	/**
-	 * Check if we can convert to WebM format.
-	 *
-	 * @since 0.1.0
-	 * @return bool True if WebM conversion is possible, false otherwise.
-	 */
-	private function can_convert_to_webm() {
-		// Check if PHP-FFmpeg library is available
-		if ( ! class_exists( 'FluxMedia\FFMpeg\FFMpeg' ) ) {
-			return false;
-		}
-		
-		// Check if FFmpeg binary is available
-		if ( ! $this->is_executable( $this->find_ffmpeg_binary() ) ) {
-			return false;
-		}
-		
-		// Check if WebM codec is supported
-		return $this->supports_webm();
 	}
 
 	/**
@@ -273,28 +162,11 @@ class FFmpegProcessor implements VideoProcessorInterface {
 		return 'Unknown';
 	}
 
-	/**
-	 * Get available codecs information.
-	 *
-	 * @since 0.1.0
-	 * @return array Codec information.
-	 */
-	private function get_codec_info() {
-		$codecs = [];
-		
-		// Check for AV1 support
-		$codecs['av1'] = $this->supports_av1();
-		
-		// Check for WebM support
-		$codecs['webm'] = $this->supports_webm();
-		
-		return $codecs;
-	}
 
 	/**
 	 * Convert video to AV1 format.
 	 *
-	 * @since 0.1.0
+	 * @since 1.0.0
 	 * @param string $source_path Source video path.
 	 * @param string $destination_path Destination path.
 	 * @param array  $options Conversion options.
@@ -322,12 +194,13 @@ class FFmpegProcessor implements VideoProcessorInterface {
 			
 			// Set AV1-specific parameters
 			$crf = $options['crf'] ?? 28;
-			$preset = $options['preset'] ?? 'medium';
 			$cpu_used = $options['cpu_used'] ?? 4;
+			
+			// cpu-used: 0-8, where lower = slower but better compression
+			// Validation is handled in Settings::get_video_av1_cpu_used()
 			
 			$format->setAdditionalParameters([
 				'-crf', (string) $crf,
-				'-preset', $preset,
 				'-cpu-used', (string) $cpu_used,
 				'-movflags', '+faststart',
 			]);
@@ -374,11 +247,14 @@ class FFmpegProcessor implements VideoProcessorInterface {
 			
 			// Set WebM-specific parameters
 			$crf = $options['crf'] ?? 30;
-			$preset = $options['preset'] ?? 'medium';
+			$speed = $options['speed'] ?? 4;
+			
+			// speed: 0-9, where lower = slower but better compression
+			// Validation is handled in Settings::get_video_webm_speed()
 			
 			$format->setAdditionalParameters([
 				'-crf', (string) $crf,
-				'-preset', $preset,
+				'-speed', (string) $speed,
 				'-movflags', '+faststart',
 			]);
 
@@ -438,41 +314,34 @@ class FFmpegProcessor implements VideoProcessorInterface {
 	/**
 	 * Check if processor supports AV1.
 	 *
-	 * @since 0.1.0
+	 * Uses ProcessorDetector to check AV1 support.
+	 *
+	 * @since 1.0.0
 	 * @return bool True if AV1 is supported, false otherwise.
 	 */
 	public function supports_av1() {
-		if ( ! $this->ffmpeg ) {
-			return false;
+		// Use ProcessorDetector to check AV1 support
+		$processors = $this->detector->get_available_video_processors();
+		if ( isset( $processors[ ProcessorTypes::VIDEO_FFMPEG ] ) ) {
+			return $processors[ ProcessorTypes::VIDEO_FFMPEG ]['av1_support'] ?? false;
 		}
-
-		try {
-			// Try to create a format with AV1 codec to test support
-			$format = new X264();
-			$format->setVideoCodec( 'libaom-av1' );
-			return true;
-		} catch ( \Exception $e ) {
-			return false;
-		}
+		return false;
 	}
 
 	/**
 	 * Check if processor supports WebM.
 	 *
-	 * @since 0.1.0
+	 * Uses ProcessorDetector to check WebM support.
+	 *
+	 * @since 1.0.0
 	 * @return bool True if WebM is supported, false otherwise.
 	 */
 	public function supports_webm() {
-		if ( ! $this->ffmpeg ) {
-			return false;
+		// Use ProcessorDetector to check WebM support
+		$processors = $this->detector->get_available_video_processors();
+		if ( isset( $processors[ ProcessorTypes::VIDEO_FFMPEG ] ) ) {
+			return $processors[ ProcessorTypes::VIDEO_FFMPEG ]['webm_support'] ?? false;
 		}
-
-		try {
-			// Try to create a WebM format to test support
-			$format = new WebM();
-			return true;
-		} catch ( \Exception $e ) {
-			return false;
-		}
+		return false;
 	}
 }

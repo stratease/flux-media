@@ -29,15 +29,16 @@ class Options {
 		'image_avif_speed' => 6,
 		'image_auto_convert' => true,
 		'image_formats' => [ 'webp', 'avif' ],
-		'hybrid_approach' => true, // Hybrid WebP + AVIF approach
+		'image_hybrid_approach' => false, // Hybrid WebP + AVIF approach
 
 		// Video conversion settings.
 		'video_av1_crf' => 28,
-		'video_av1_preset' => 'medium',
+		'video_av1_cpu_used' => 4,
 		'video_webm_crf' => 30,
-		'video_webm_preset' => 'medium',
+		'video_webm_speed' => 4,
 		'video_auto_convert' => true,
 		'video_formats' => [ 'av1', 'webm' ],
+		'video_hybrid_approach' => false, // Hybrid AV1 + WebM approach
 
 		// General settings.
 		'async_processing' => true,

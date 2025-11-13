@@ -10,6 +10,7 @@ namespace FluxMedia\App\Services;
 
 use FluxMedia\App\Services\Logger;
 use FluxMedia\App\Services\Settings;
+use FluxMedia\App\Services\Converter;
 
 /**
  * Service for bulk conversion of existing media files.
@@ -197,7 +198,7 @@ class BulkConverter {
 	/**
 	 * Process image conversion for bulk processing.
 	 *
-	 * @since 0.1.0
+	 * @since 1.0.0
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $file_path Source file path.
 	 * @return array Conversion results.
@@ -210,7 +211,7 @@ class BulkConverter {
 
 		// Get settings from WordPress
 		$settings = [
-			'hybrid_approach' => Settings::is_hybrid_approach_enabled(),
+			'image_hybrid_approach' => Settings::is_image_hybrid_approach_enabled(),
 			'webp_quality' => Settings::get_webp_quality(),
 			'avif_quality' => Settings::get_avif_quality(),
 			'avif_speed' => Settings::get_avif_speed(),
@@ -253,7 +254,7 @@ class BulkConverter {
 	/**
 	 * Process video conversion for bulk processing.
 	 *
-	 * @since 0.1.0
+	 * @since 1.0.0
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $file_path Source file path.
 	 * @return array Conversion results.
@@ -266,13 +267,21 @@ class BulkConverter {
 
 		// Get settings from WordPress
 		$settings = [
+			'video_hybrid_approach' => Settings::is_video_hybrid_approach_enabled(),
 			'video_av1_crf' => Settings::get_video_av1_crf(),
+			'video_av1_cpu_used' => Settings::get_video_av1_cpu_used(),
 			'video_webm_crf' => Settings::get_video_webm_crf(),
+			'video_webm_speed' => Settings::get_video_webm_speed(),
 		];
 
 		// Create destination paths for requested formats
 		$destination_paths = [];
 		$video_formats = Settings::get_video_formats();
+		
+		// Ensure video_formats is an array
+		if ( ! is_array( $video_formats ) ) {
+			$video_formats = [];
+		}
 		
 		foreach ( $video_formats as $format ) {
 			$destination_paths[ $format ] = $file_dir . '/' . $file_name . '.' . $format;

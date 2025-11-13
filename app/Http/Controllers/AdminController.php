@@ -112,7 +112,7 @@ class AdminController {
 	 */
 	private function get_script_url() {
 		// Use webpack dev server if debug mode is enabled
-		if ( defined( 'WP_DEBUG' ) && WP_DEBUG || defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ) {
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG && defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ) {
 			return 'http://localhost:3000/admin.bundle.js';
 		}
 
@@ -126,9 +126,25 @@ class AdminController {
 	 * @since 0.1.0
 	 */
 	public function render_main_page() {
+		$is_debug = defined( 'WP_DEBUG' ) && WP_DEBUG && defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG;
 		?>
 		<div class="wrap">
 			<div id="flux-media-optimizer-app">
+			<?php if ( $is_debug ) : ?>
+				<div class="notice notice-warning" style="margin: 20px 0; padding: 15px;">
+					<p><strong><?php esc_html_e( 'Development Mode Active', 'flux-media-optimizer' ); ?></strong></p>
+					<p><?php esc_html_e( 'Development mode is enabled. The admin interface is attempting to load the React development bundle from:', 'flux-media-optimizer' ); ?></p>
+					<p><code><?php echo esc_html( $this->get_script_url() ); ?></code></p>
+					<p><?php esc_html_e( 'This assumes you are testing on a localhost WordPress environment with the webpack dev server running on port 3000.', 'flux-media-optimizer' ); ?></p>
+					<p><strong><?php esc_html_e( 'To use the development build:', 'flux-media-optimizer' ); ?></strong></p>
+					<ol>
+						<li><?php esc_html_e( 'Navigate to the plugin directory in your terminal', 'flux-media-optimizer' ); ?></li>
+						<li><?php esc_html_e( 'Run "npm run start" to start the webpack dev server', 'flux-media-optimizer' ); ?></li>
+						<li><?php esc_html_e( 'Ensure the dev server is running on http://localhost:3000', 'flux-media-optimizer' ); ?></li>
+						<li><?php esc_html_e( 'Refresh this page to load the development build', 'flux-media-optimizer' ); ?></li>
+					</ol>
+				</div>
+			<?php endif; ?>
 			</div>
 		</div>
 		<?php

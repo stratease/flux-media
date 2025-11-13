@@ -18,15 +18,9 @@ use FluxMedia\App\Services\Converter;
 class WordPressImageRenderer {
 
     /**
-     * Image converter instance.
-     *
-     * @since 0.1.0
-     * @var ImageConverter
-     */
-    private $image_converter;
-
-    /**
      * Video converter instance.
+     *
+     * Used for detecting video files in admin UI to show async processing notices.
      *
      * @since 0.1.0
      * @var VideoConverter
@@ -36,12 +30,10 @@ class WordPressImageRenderer {
     /**
      * Constructor.
      *
-     * @since 0.1.0
-     * @param ImageConverter $image_converter Image converter service.
+     * @since 1.0.0
      * @param VideoConverter $video_converter Video converter service.
      */
-    public function __construct( ImageConverter $image_converter, VideoConverter $video_converter ) {
-        $this->image_converter = $image_converter;
+    public function __construct( VideoConverter $video_converter ) {
         $this->video_converter = $video_converter;
     }
 
@@ -182,9 +174,9 @@ class WordPressImageRenderer {
     }
 
     /**
-     * Modify attachment URL for optimized display.
+     * Modify attachment URL for optimized image display.
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param string $url The original attachment URL.
      * @param int    $attachment_id The attachment ID.
      * @param array  $converted_files Array of converted file paths.
@@ -195,12 +187,10 @@ class WordPressImageRenderer {
             return $url;
         }
 
-        // Single format approach: Use priority AVIF > WebP
+        // For images: Use priority AVIF > WebP
         if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
-            // Use AVIF as primary format
             return self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
         } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            // Use WebP as primary format
             return self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
         }
 
@@ -224,7 +214,7 @@ class WordPressImageRenderer {
 
         // Check if we have converted formats available
         if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            if ( Settings::is_hybrid_approach_enabled() ) {
+            if ( Settings::is_image_hybrid_approach_enabled() ) {
                 // Hybrid approach: Use picture element with sources and fallback
                 $this->enqueue_picture_css();
                 return $this->create_picture_element( $attachment_id, $converted_files, $filtered_image );
@@ -238,7 +228,7 @@ class WordPressImageRenderer {
     }
 
     /**
-     * Modify block content for optimized display.
+     * Modify block content for optimized image display.
      *
      * @since 0.1.0
      * @param string $block_content The block content.
@@ -247,7 +237,7 @@ class WordPressImageRenderer {
      */
     public function modify_block_content( $block_content, $block ) {
         // Only process image blocks
-        if ( ! in_array( $block['blockName'], [ 'core/image' ], true ) ) {
+        if ( 'core/image' !== ( $block['blockName'] ?? '' ) ) {
             return $block_content;
         }
 
@@ -276,7 +266,7 @@ class WordPressImageRenderer {
 
         // Check if we have converted formats available
         if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            if ( Settings::is_hybrid_approach_enabled() ) {
+            if ( Settings::is_image_hybrid_approach_enabled() ) {
                 // Hybrid approach: Use picture element with sources and fallback
                 $this->enqueue_picture_css();
                 return $this->create_block_picture_element( $attachment_id, $converted_files, $block_content, $attributes );
@@ -320,7 +310,7 @@ class WordPressImageRenderer {
             
             // Check if we have converted formats available
             if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-                if ( Settings::is_hybrid_approach_enabled() ) {
+                if ( Settings::is_image_hybrid_approach_enabled() ) {
                     // Hybrid approach: Use picture element with sources and fallback
                     $this->enqueue_picture_css();
                     return $this->create_picture_element( $attachment_id, $converted_files, $full_match );
@@ -333,6 +323,7 @@ class WordPressImageRenderer {
             return $full_match;
         }, $content );
     }
+
 
     /**
      * Modify attachment fields for admin display.
@@ -670,9 +661,9 @@ class WordPressImageRenderer {
     }
 
     /**
-     * Get conversion actions HTML for admin display.
+     * Get conversion actions HTML.
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param int  $attachment_id Attachment ID.
      * @param bool $conversion_disabled Whether conversion is disabled.
      * @return string HTML for conversion actions.
@@ -680,6 +671,20 @@ class WordPressImageRenderer {
     private function get_conversion_actions_html( $attachment_id, $conversion_disabled ) {
         $html = '<div class="flux-media-optimizer-conversion-actions" style="background: #f0f8ff; border: 1px solid #b3d9ff; border-radius: 4px; padding: 12px; margin: 10px 0;">';
         $html .= '<h4 style="margin: 0 0 10px 0; color: #333; font-size: 14px;">' . __( 'Conversion Actions', 'flux-media-optimizer' ) . '</h4>';
+        
+        // Check if this is a video attachment and if there are no converted files
+        $file_path = get_attached_file( $attachment_id );
+        $is_video = $file_path && $this->video_converter->is_supported_video( $file_path );
+        $converted_files = get_post_meta( $attachment_id, '_flux_media_optimizer_converted_files', true );
+        $no_converted_files = empty( $converted_files );
+        
+        // Show async notice for videos with no converted files
+        if ( $is_video && $no_converted_files && ! $conversion_disabled ) {
+            $html .= '<p style="margin: 0 0 10px 0; padding: 8px; background: #fff3cd; border-left: 4px solid #ffb900; color: #856404; font-size: 13px; line-height: 1.5;">';
+            $html .= '<strong>' . __( 'Note:', 'flux-media-optimizer' ) . '</strong> ';
+            $html .= __( 'Video conversions are processed asynchronously and may not appear immediately. Please check back in a few minutes.', 'flux-media-optimizer' );
+            $html .= '</p>';
+        }
         
         if ( $conversion_disabled ) {
             $html .= sprintf(
@@ -693,7 +698,6 @@ class WordPressImageRenderer {
             $html .= '<div style="display: flex; gap: 8px; flex-wrap: wrap;">';
             
             // Check if there are converted files to determine button text
-            $converted_files = get_post_meta( $attachment_id, '_flux_media_optimizer_converted_files', true );
             $button_text = ! empty( $converted_files ) ? __( 'Re-convert', 'flux-media-optimizer' ) : __( 'Convert', 'flux-media-optimizer' );
             
             $html .= sprintf(
@@ -771,4 +775,5 @@ class WordPressImageRenderer {
             $block_content
         );
     }
+
 }

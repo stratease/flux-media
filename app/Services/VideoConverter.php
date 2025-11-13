@@ -12,6 +12,7 @@ use FluxMedia\App\Services\LoggerInterface;
 use FluxMedia\App\Services\Converter;
 use FluxMedia\App\Services\VideoProcessorInterface;
 use FluxMedia\App\Services\FFmpegProcessor;
+use FluxMedia\App\Services\ProcessorDetector;
 
 /**
  * Video conversion service that handles AV1 and WebM conversion.
@@ -117,8 +118,8 @@ class VideoConverter implements Converter {
             return null;
         }
 
-        // Create FFmpegProcessor instance
-        $processor = new FFmpegProcessor( $this->logger );
+        // Create FFmpegProcessor instance with ProcessorDetector
+        $processor = new FFmpegProcessor( $this->logger, new ProcessorDetector() );
 
         // Check if processor can actually convert to supported formats
         $processor_info = $processor->get_info();
@@ -370,7 +371,7 @@ class VideoConverter implements Converter {
     /**
      * Process video file - convert to multiple formats.
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param string $source_path Source video file path.
      * @param array  $destination_paths Array of format => destination_path mappings.
      * @param array  $settings Conversion settings.
@@ -445,12 +446,43 @@ class VideoConverter implements Converter {
             $conversion_options = [];
 
             $success = false;
-            if ( Converter::FORMAT_AV1 === $format && $this->can_convert_to_av1() ) {
-                $conversion_options = ['crf' => $settings['video_av1_crf']];
+            
+            // Normalize format string for comparison (ensure lowercase)
+            $format_normalized = strtolower( trim( $format ) );
+            
+            if ( Converter::FORMAT_AV1 === $format_normalized && $this->can_convert_to_av1() ) {
+                $conversion_options = [
+                    'crf' => $settings['video_av1_crf'] ?? 28,
+                    'cpu_used' => $settings['video_av1_cpu_used'] ?? 4,
+                ];
                 $success = $this->convert_to_av1( $source_path, $destination_path, $conversion_options );
-            } elseif ( Converter::FORMAT_WEBM === $format && $this->can_convert_to_webm() ) {
-                $conversion_options = ['crf' => $settings['video_webm_crf']];
+                if ( ! $success ) {
+                    $results['errors'][] = "AV1 conversion failed for format: {$format}";
+                    $this->logger->error( "AV1 conversion failed for: {$destination_path}" );
+                }
+            } elseif ( Converter::FORMAT_WEBM === $format_normalized && $this->can_convert_to_webm() ) {
+                $conversion_options = [
+                    'crf' => $settings['video_webm_crf'] ?? 30,
+                    'speed' => $settings['video_webm_speed'] ?? 4,
+                ];
                 $success = $this->convert_to_webm( $source_path, $destination_path, $conversion_options );
+                if ( ! $success ) {
+                    $results['errors'][] = "WebM conversion failed for format: {$format}";
+                    $this->logger->error( "WebM conversion failed for: {$destination_path}" );
+                }
+            } else {
+                // Format not supported or processor not available
+                $format_name = Converter::FORMAT_AV1 === $format_normalized ? 'AV1' : ( Converter::FORMAT_WEBM === $format_normalized ? 'WebM' : $format );
+                $can_av1 = $this->can_convert_to_av1();
+                $can_webm = $this->can_convert_to_webm();
+                $error_msg = "Format {$format_name} is not supported or processor not available";
+                if ( Converter::FORMAT_AV1 === $format_normalized && ! $can_av1 ) {
+                    $error_msg .= " (AV1 support: " . ( $can_av1 ? 'yes' : 'no' ) . ")";
+                } elseif ( Converter::FORMAT_WEBM === $format_normalized && ! $can_webm ) {
+                    $error_msg .= " (WebM support: " . ( $can_webm ? 'yes' : 'no' ) . ")";
+                }
+                $results['errors'][] = $error_msg;
+                $this->logger->warning( "Skipping unsupported format: {$format} (normalized: {$format_normalized}, AV1 support: " . ( $can_av1 ? 'yes' : 'no' ) . ", WebM support: " . ( $can_webm ? 'yes' : 'no' ) . ")" );
             }
 
             if ( $success ) {

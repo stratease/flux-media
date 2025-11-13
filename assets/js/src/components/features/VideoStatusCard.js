@@ -139,7 +139,8 @@ const VideoStatusCard = ({ status, loading, error }) => {
                       <Grid item>
                         <Chip
                           label="AV1"
-                          color={processor.av1_support ? 'success' : 'error'}
+                          // color={processor.av1_support ? 'success' : 'error'} -- TODO we need to fix av1 support.
+                          color="error"
                           size="small"
                         />
                       </Grid>

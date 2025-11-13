@@ -14,8 +14,10 @@ use FluxMedia\App\Services\QuotaManager;
 use FluxMedia\App\Services\ConversionTracker;
 use FluxMedia\App\Services\BulkConverter;
 use FluxMedia\App\Services\WordPressImageRenderer;
+use FluxMedia\App\Services\WordPressVideoRenderer;
 use FluxMedia\App\Services\Logger;
 use FluxMedia\App\Services\Settings;
+use FluxMedia\App\Services\Converter;
 
 /**
  * WordPress provider that handles all WordPress integration.
@@ -81,6 +83,14 @@ class WordPressProvider {
     private $image_renderer;
 
     /**
+     * WordPress video renderer instance.
+     *
+     * @since 1.0.0
+     * @var WordPressVideoRenderer
+     */
+    private $video_renderer;
+
+    /**
      * Constructor.
      *
      * @since 0.1.0
@@ -91,7 +101,8 @@ class WordPressProvider {
         $this->logger = new Logger();
         $this->image_converter = $image_converter;
         $this->video_converter = $video_converter;
-        $this->image_renderer = new WordPressImageRenderer( $image_converter, $video_converter );
+        $this->image_renderer = new WordPressImageRenderer( $video_converter );
+        $this->video_renderer = new WordPressVideoRenderer();
         $this->quota_manager = new QuotaManager( $this->logger );
         $this->conversion_tracker = new ConversionTracker( $this->logger );
         $this->bulk_converter = new BulkConverter( $this->logger, $image_converter, $video_converter, $this->quota_manager, $this->conversion_tracker );
@@ -128,6 +139,8 @@ class WordPressProvider {
         add_action( 'wp_ajax_flux_media_optimizer_convert_attachment', [ $this, 'handle_ajax_convert_attachment' ] );
         add_action( 'wp_ajax_flux_media_optimizer_disable_conversion', [ $this, 'handle_ajax_disable_conversion' ] );
         add_action( 'wp_ajax_flux_media_optimizer_enable_conversion', [ $this, 'handle_ajax_enable_conversion' ] );
+        // Cron job for individual video processing
+        add_action( 'flux_media_optimizer_process_video', [ $this, 'handle_process_video_cron' ], 10, 2 );
         // Cron job for bulk conversion (only if enabled)
         if ( Settings::is_bulk_conversion_enabled() ) {
             add_action( 'flux_media_optimizer_bulk_conversion', [ $this, 'handle_bulk_conversion_cron' ] );
@@ -189,7 +202,7 @@ class WordPressProvider {
         } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
             // Check if video auto-conversion is enabled
             if ( Settings::is_video_auto_convert_enabled() ) {
-                $this->process_video_conversion( $attachment_id, $file_path );
+                $this->enqueue_video_processing( $attachment_id, $file_path );
             }
         }
     }
@@ -224,21 +237,19 @@ class WordPressProvider {
      *
      * Do not check our disabled flag here - sometimes we run this from explicit image conversions which should override.
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param int    $attachment_id Attachment ID.
      * @param string $file_path Source file path.
      * @return void
      */
     private function process_image_conversion( $attachment_id, $file_path ) {
         // Get upload directory info
-        $upload_dir = wp_upload_dir();
         $file_info = pathinfo( $file_path );
         $file_dir = $file_info['dirname'];
         $file_name = $file_info['filename'];
 
         // Get settings from WordPress
         $settings = [
-            'hybrid_approach' => Settings::is_hybrid_approach_enabled(),
             'webp_quality' => Settings::get_webp_quality(),
             'avif_quality' => Settings::get_avif_quality(),
             'avif_speed' => Settings::get_avif_speed(),
@@ -291,28 +302,40 @@ class WordPressProvider {
     /**
      * Process video conversion.
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param int    $attachment_id Attachment ID.
      * @param string $file_path Source file path.
      * @return void
      */
     private function process_video_conversion( $attachment_id, $file_path ) {
         // Get upload directory info
-        $upload_dir = wp_upload_dir();
         $file_info = pathinfo( $file_path );
         $file_dir = $file_info['dirname'];
         $file_name = $file_info['filename'];
 
         // Get settings from WordPress
         $settings = [
+            'video_hybrid_approach' => Settings::is_video_hybrid_approach_enabled(),
             'video_av1_crf' => Settings::get_video_av1_crf(),
+            'video_av1_cpu_used' => Settings::get_video_av1_cpu_used(),
             'video_webm_crf' => Settings::get_video_webm_crf(),
+            'video_webm_speed' => Settings::get_video_webm_speed(),
         ];
 
         // Create destination paths for requested formats
         $destination_paths = [];
         $video_formats = Settings::get_video_formats();
         
+        // Ensure video_formats is an array
+        if ( ! is_array( $video_formats ) ) {
+            $video_formats = [];
+        }
+        
+        // Log formats being processed for debugging
+        if ( empty( $video_formats ) ) {
+            $this->logger->warning( "No video formats configured for conversion. Attachment ID: {$attachment_id}" );
+        }
+
         foreach ( $video_formats as $format ) {
             $destination_paths[ $format ] = $file_dir . '/' . $file_name . '.' . $format;
         }
@@ -476,53 +499,112 @@ class WordPressProvider {
     }
 
     /**
+     * Check if converted files contain image formats.
+     *
+     * @since 1.0.0
+     * @param array $converted_files Array of converted file paths.
+     * @return bool True if image formats are present.
+     */
+    private function has_image_formats( $converted_files ) {
+        return isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] );
+    }
+
+    /**
+     * Check if converted files contain video formats.
+     *
+     * @since 1.0.0
+     * @param array $converted_files Array of converted file paths.
+     * @return bool True if video formats are present.
+     */
+    private function has_video_formats( $converted_files ) {
+        return isset( $converted_files[ Converter::FORMAT_AV1 ] ) || isset( $converted_files[ Converter::FORMAT_WEBM ] );
+    }
+
+    /**
      * Handle attachment URL filter.
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param string $url The attachment URL.
      * @param int    $attachment_id The attachment ID.
      * @return string Modified URL.
      */
     public function handle_attachment_url_filter( $url, $attachment_id ) {
         $converted_files = $this->get_converted_files( $attachment_id );
-        return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        if ( empty( $converted_files ) ) {
+            return $url;
+        }
+
+        // Determine media type and use appropriate renderer
+        if ( $this->has_video_formats( $converted_files ) ) {
+            return $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        } elseif ( $this->has_image_formats( $converted_files ) ) {
+            return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        }
+
+        return $url;
     }
 
     /**
-     * Handle content images filter.
+     * Handle content media filter (images and videos).
      *
-     * @since 0.1.0
-     * @param string $filtered_image The filtered image HTML.
-     * @param string $context The context of the image.
+     * @since 1.0.0
+     * @param string $filtered_media The filtered media HTML.
+     * @param string $context The context of the media.
      * @param int    $attachment_id The attachment ID.
-     * @return string Modified image HTML.
+     * @return string Modified media HTML.
      */
-    public function handle_content_images_filter( $filtered_image, $context, $attachment_id ) {
+    public function handle_content_images_filter( $filtered_media, $context, $attachment_id ) {
         $converted_files = $this->get_converted_files( $attachment_id );
-        return $this->image_renderer->modify_content_images( $filtered_image, $context, $attachment_id, $converted_files );
+        if ( empty( $converted_files ) ) {
+            return $filtered_media;
+        }
+
+        // Determine media type and use appropriate renderer
+        if ( $this->has_video_formats( $converted_files ) ) {
+            return $this->video_renderer->modify_content_videos( $filtered_media, $context, $attachment_id, $converted_files );
+        } elseif ( $this->has_image_formats( $converted_files ) ) {
+            return $this->image_renderer->modify_content_images( $filtered_media, $context, $attachment_id, $converted_files );
+        }
+
+        return $filtered_media;
     }
 
     /**
-     * Handle post content images filter.
+     * Handle post content media filter (images and videos).
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param string $content Post content.
      * @return string Modified content.
      */
     public function handle_post_content_images_filter( $content ) {
-        return $this->image_renderer->modify_post_content_images( $content );
+        // Process images first
+        $content = $this->image_renderer->modify_post_content_images( $content );
+        
+        // Process videos
+        $content = $this->video_renderer->modify_post_content_videos( $content );
+        
+        return $content;
     }
 
     /**
-     * Handle render block filter for block editor images.
+     * Handle render block filter for block editor media (images and videos).
      *
-     * @since 0.1.0
+     * @since 1.0.0
      * @param string $block_content The block content.
      * @param array  $block The block data.
      * @return string Modified block content.
      */
     public function handle_render_block_filter( $block_content, $block ) {
-        return $this->image_renderer->modify_block_content( $block_content, $block );
+        $block_name = $block['blockName'] ?? '';
+        
+        // Route to appropriate renderer based on block type
+        if ( 'core/video' === $block_name ) {
+            return $this->video_renderer->modify_block_content( $block_content, $block );
+        } elseif ( 'core/image' === $block_name ) {
+            return $this->image_renderer->modify_block_content( $block_content, $block );
+        }
+
+        return $block_content;
     }
 
     /**
@@ -540,7 +622,9 @@ class WordPressProvider {
     /**
      * Manually convert an attachment.
      *
-     * @since 0.1.0
+     * Images are processed synchronously, videos are enqueued for async processing.
+     *
+     * @since 1.0.0
      * @param int $attachment_id WordPress attachment ID.
      * @return array Conversion results.
      */
@@ -562,10 +646,13 @@ class WordPressProvider {
                 'converted_files' => $this->get_converted_files( $attachment_id ),
             ];
         } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
-            $this->process_video_conversion( $attachment_id, $file_path );
+            // Enqueue video processing for async processing
+            $this->enqueue_video_processing( $attachment_id, $file_path );
             return [
                 'success' => true,
                 'type' => 'video',
+                'queued' => true,
+                'message' => 'Video conversion has been queued for processing',
                 'converted_files' => $this->get_converted_files( $attachment_id ),
             ];
         }
@@ -673,6 +760,69 @@ class WordPressProvider {
     }
 
     /**
+     * Enqueue video processing via WordPress cron.
+     *
+     * Schedules a single-event cron job to process video conversion asynchronously.
+     *
+     * @since 1.0.0
+     * @param int    $attachment_id Attachment ID.
+     * @param string $file_path Source file path.
+     * @return void
+     */
+    private function enqueue_video_processing( $attachment_id, $file_path ) {
+        // Check if a cron job is already scheduled for this attachment
+        $cron_hook = 'flux_media_optimizer_process_video';
+        $cron_args = [ $attachment_id, $file_path ];
+        
+        // Check if this exact cron job is already scheduled
+        $scheduled = wp_next_scheduled( $cron_hook, $cron_args );
+        
+        if ( ! $scheduled ) {
+            // Schedule immediate processing (next cron run)
+            wp_schedule_single_event( time(), $cron_hook, $cron_args );
+        }
+    }
+
+    /**
+     * Handle video processing cron job.
+     *
+     * Processes video conversion asynchronously via WordPress cron.
+     *
+     * @since 1.0.0
+     * @param int    $attachment_id Attachment ID.
+     * @param string $file_path Source file path.
+     * @return void
+     */
+    public function handle_process_video_cron( $attachment_id, $file_path ) {
+        // Verify attachment still exists
+        if ( ! get_post( $attachment_id ) ) {
+            $this->logger->warning( "Video processing cron skipped: attachment {$attachment_id} no longer exists" );
+            return;
+        }
+
+        // Check if conversion is disabled for this attachment
+        if ( get_post_meta( $attachment_id, '_flux_media_optimizer_conversion_disabled', true ) ) {
+            $this->logger->info( "Video processing cron skipped: conversion disabled for attachment {$attachment_id}" );
+            return;
+        }
+
+        // Verify file still exists
+        if ( ! file_exists( $file_path ) ) {
+            $this->logger->warning( "Video processing cron skipped: file not found for attachment {$attachment_id}: {$file_path}" );
+            return;
+        }
+
+        // Verify it's still a supported video
+        if ( ! $this->video_converter->is_supported_video( $file_path ) ) {
+            $this->logger->warning( "Video processing cron skipped: unsupported video format for attachment {$attachment_id}" );
+            return;
+        }
+
+        // Process the video conversion
+        $this->process_video_conversion( $attachment_id, $file_path );
+    }
+
+    /**
      * Handle bulk conversion cron job.
      *
      * @since 0.1.0
@@ -759,7 +909,7 @@ class WordPressProvider {
             }
         } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
             if ( Settings::is_video_auto_convert_enabled() ) {
-                $this->process_video_conversion( $attachment_id, $file_path );
+                $this->enqueue_video_processing( $attachment_id, $file_path );
             }
         }
 
@@ -794,7 +944,7 @@ class WordPressProvider {
             }
         } elseif ( $this->video_converter->is_supported_video( $file ) ) {
             if ( Settings::is_video_auto_convert_enabled() ) {
-                $this->process_video_conversion( $attachment_id, $file );
+                $this->enqueue_video_processing( $attachment_id, $file );
             }
         }
 

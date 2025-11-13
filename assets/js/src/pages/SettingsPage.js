@@ -102,24 +102,13 @@ const SettingsPage = () => {
           )}
 
           <Grid container spacing={3}>
-        {/* General Settings */}
-        <Grid item xs={12} md={6}>
+        {/* General Settings - Full Width */}
+        <Grid item xs={12}>
           <Box>
             <Typography variant="h5" gutterBottom>
               {__('General Settings', 'flux-media-optimizer')}
             </Typography>
             <Stack spacing={2}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={settings?.image_auto_convert}
-                    disabled={isLoading}
-                    onChange={handleSettingChange('image_auto_convert')}
-                  />
-                }
-                label={__('Auto-convert on upload', 'flux-media-optimizer')}
-              />
-              
               <FormControlLabel
                 control={
                   <Switch
@@ -131,28 +120,45 @@ const SettingsPage = () => {
                 label={__('Enable bulk conversion', 'flux-media-optimizer')}
               /> 
               <FormHelperText>
-              
                 {__('Automatically convert existing media files in the background using WordPress cron.', 'flux-media-optimizer')}
-            
-            </FormHelperText>
-         
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={settings?.hybrid_approach}
-                      disabled={isLoading || (!isWebPSupported() && !isAVIFSupported())}
-                      onChange={handleSettingChange('hybrid_approach')}
-                    />
-                  }
-                  label={__('Hybrid approach (experimental - use with caution)', 'flux-media-optimizer')}
-                />
-                            <FormHelperText>
-              {
-              __('Creates both WebP and AVIF formats when supported by your server. Serves AVIF where supported (via <picture> tags or server detection), with WebP and the original image as fallback. This is the recommended approach for maximum performance and device compatibility. This is more dependent on theme and plugin compatibility than the native approach.', 'flux-media-optimizer')
-              }
-            </FormHelperText>
+              </FormHelperText>
+            </Stack>
+          </Box>
+        </Grid>
 
-              {!settings?.hybrid_approach && (
+        {/* Image Settings - Left Column */}
+        <Grid item xs={12} md={6}>
+          <Box>
+            <Typography variant="h5" gutterBottom>
+              {__('Image Settings', 'flux-media-optimizer')}
+            </Typography>
+            <Stack spacing={2}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings?.image_auto_convert}
+                    disabled={isLoading}
+                    onChange={handleSettingChange('image_auto_convert')}
+                  />
+                }
+                label={__('Auto-convert images on upload', 'flux-media-optimizer')}
+              />
+              
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings?.image_hybrid_approach}
+                    disabled={isLoading || (!isWebPSupported() && !isAVIFSupported())}
+                    onChange={handleSettingChange('image_hybrid_approach')}
+                  />
+                }
+                label={__('Image hybrid approach (experimental - use with caution)', 'flux-media-optimizer')}
+              />
+              <FormHelperText>
+                {__('Creates both WebP and AVIF formats when supported by your server. Serves AVIF where supported (via <picture> tags or server detection), with WebP and the original image as fallback. This is the recommended approach for maximum performance and device compatibility. This is more dependent on theme and plugin compatibility than the native approach.', 'flux-media-optimizer')}
+              </FormHelperText>
+
+              {!settings?.image_hybrid_approach && (
                 <>
                   <FormControlLabel
                     control={
@@ -194,12 +200,10 @@ const SettingsPage = () => {
                 </>
               )}
             </Stack>
-            
-
           </Box>
         </Grid>
 
-        {/* Video Settings */}
+        {/* Video Settings - Right Column */}
         <Grid item xs={12} md={6}>
           <Box>
             <Typography variant="h5" gutterBottom>
@@ -220,43 +224,61 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings?.video_formats?.includes('av1')}
+                    checked={settings?.video_hybrid_approach}
                     disabled={isLoading}
-                    onChange={(e) => {
-                      const newFormats = e.target.checked 
-                        ? [...(settings?.video_formats || []).filter(f => f !== 'av1'), 'av1']
-                        : (settings?.video_formats || []).filter(f => f !== 'av1');
-                      
-                      // Save only the video_formats field
-                      debouncedSave({ video_formats: newFormats });
-                    }}
+                    onChange={handleSettingChange('video_hybrid_approach')}
                   />
                 }
-                label={__('Enable AV1 conversion', 'flux-media-optimizer')}
+                label={__('Video hybrid approach (experimental - use with caution)', 'flux-media-optimizer')}
               />
-              
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={settings?.video_formats?.includes('webm')}
-                    disabled={isLoading}
-                    onChange={(e) => {
-                      const newFormats = e.target.checked 
-                        ? [...(settings?.video_formats || []).filter(f => f !== 'webm'), 'webm']
-                        : (settings?.video_formats || []).filter(f => f !== 'webm');
-                      
-                      // Save only the video_formats field
-                      debouncedSave({ video_formats: newFormats });
-                    }}
+              <FormHelperText>
+                {__('Creates both AV1 and WebM formats when supported by your server. Serves AV1 where supported (via multiple <source> elements), with WebM and the original video as fallback. This is the recommended approach for maximum performance and device compatibility. This is more dependent on theme and plugin compatibility than the native approach.', 'flux-media-optimizer')}
+              </FormHelperText>
+
+              {!settings?.video_hybrid_approach && (
+                <>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={settings?.video_formats?.includes('av1')}
+                        disabled={isLoading}
+                        onChange={(e) => {
+                          const newFormats = e.target.checked 
+                            ? [...(settings?.video_formats || []).filter(f => f !== 'av1'), 'av1']
+                            : (settings?.video_formats || []).filter(f => f !== 'av1');
+                          
+                          // Save only the video_formats field
+                          debouncedSave({ video_formats: newFormats });
+                        }}
+                      />
+                    }
+                    label={__('Enable AV1 conversion', 'flux-media-optimizer')}
                   />
-                }
-                label={__('Enable WebM conversion', 'flux-media-optimizer')}
-              />
+                  
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={settings?.video_formats?.includes('webm')}
+                        disabled={isLoading}
+                        onChange={(e) => {
+                          const newFormats = e.target.checked 
+                            ? [...(settings?.video_formats || []).filter(f => f !== 'webm'), 'webm']
+                            : (settings?.video_formats || []).filter(f => f !== 'webm');
+                          
+                          // Save only the video_formats field
+                          debouncedSave({ video_formats: newFormats });
+                        }}
+                      />
+                    }
+                    label={__('Enable WebM conversion', 'flux-media-optimizer')}
+                  />
+                </>
+              )}
             </Stack>
           </Box>
         </Grid>
 
-        {/* Image Quality Settings */}
+        {/* Image Quality Settings - Left Column */}
         <Grid item xs={12} md={6}>
           <Box>
             <Typography variant="h5" gutterBottom>
@@ -323,9 +345,8 @@ const SettingsPage = () => {
           </Box>
         </Grid>
 
-        {/* Video Quality Settings */}
+        {/* Video Quality Settings - Right Column */}
         <Grid item xs={12} md={6}>
-          <Divider sx={{ my: 2 }} />
           <Box>
             <Typography variant="h5" gutterBottom>
               {__('Video Quality Settings', 'flux-media-optimizer')}
@@ -369,52 +390,38 @@ const SettingsPage = () => {
 
               <Box>
                 <Typography variant="subtitle1" gutterBottom>
-                  {__('AV1 Preset', 'flux-media-optimizer')}
+                  {__('AV1 CPU Used', 'flux-media-optimizer')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {__('Current:', 'flux-media-optimizer')} {settings?.video_av1_preset} ({__('Faster presets = larger files, slower presets = smaller files', 'flux-media-optimizer')})
+                  {__('Current:', 'flux-media-optimizer')} {settings?.video_av1_cpu_used} ({__('Controls encoding speed vs file size. Lower values = slower encoding but smaller files at same quality (0-8)', 'flux-media-optimizer')})
                 </Typography>
-                <select
-                  value={settings?.video_av1_preset}
+                <input
+                  type="range"
+                  min="0"
+                  max="8"
+                  value={settings?.video_av1_cpu_used}
                   disabled={isLoading}
-                  onChange={handleSettingChange('video_av1_preset')}
-                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                >
-                  <option value="ultrafast">{__('Ultrafast', 'flux-media-optimizer')}</option>
-                  <option value="superfast">{__('Superfast', 'flux-media-optimizer')}</option>
-                  <option value="veryfast">{__('Veryfast', 'flux-media-optimizer')}</option>
-                  <option value="faster">{__('Faster', 'flux-media-optimizer')}</option>
-                  <option value="fast">{__('Fast', 'flux-media-optimizer')}</option>
-                  <option value="medium">{__('Medium', 'flux-media-optimizer')}</option>
-                  <option value="slow">{__('Slow', 'flux-media-optimizer')}</option>
-                  <option value="slower">{__('Slower', 'flux-media-optimizer')}</option>
-                  <option value="veryslow">{__('Veryslow', 'flux-media-optimizer')}</option>
-                </select>
+                  onChange={handleSettingChange('video_av1_cpu_used')}
+                  style={{ width: '100%' }}
+                />
               </Box>
 
               <Box>
                 <Typography variant="subtitle1" gutterBottom>
-                  {__('WebM Preset', 'flux-media-optimizer')}
+                  {__('WebM Speed', 'flux-media-optimizer')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {__('Current:', 'flux-media-optimizer')} {settings?.video_webm_preset} ({__('Faster presets = larger files, slower presets = smaller files', 'flux-media-optimizer')})
+                  {__('Current:', 'flux-media-optimizer')} {settings?.video_webm_speed} ({__('Controls encoding speed vs file size. Lower values = slower encoding but smaller files at same quality (0-9)', 'flux-media-optimizer')})
                 </Typography>
-                <select
-                  value={settings?.video_webm_preset}
+                <input
+                  type="range"
+                  min="0"
+                  max="9"
+                  value={settings?.video_webm_speed}
                   disabled={isLoading}
-                  onChange={handleSettingChange('video_webm_preset')}
-                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                >
-                  <option value="ultrafast">{__('Ultrafast', 'flux-media-optimizer')}</option>
-                  <option value="superfast">{__('Superfast', 'flux-media-optimizer')}</option>
-                  <option value="veryfast">{__('Veryfast', 'flux-media-optimizer')}</option>
-                  <option value="faster">{__('Faster', 'flux-media-optimizer')}</option>
-                  <option value="fast">{__('Fast', 'flux-media-optimizer')}</option>
-                  <option value="medium">{__('Medium', 'flux-media-optimizer')}</option>
-                  <option value="slow">{__('Slow', 'flux-media-optimizer')}</option>
-                  <option value="slower">{__('Slower', 'flux-media-optimizer')}</option>
-                  <option value="veryslow">{__('Veryslow', 'flux-media-optimizer')}</option>
-                </select>
+                  onChange={handleSettingChange('video_webm_speed')}
+                  style={{ width: '100%' }}
+                />
               </Box>
             </Stack>
           </Box>

@@ -453,7 +453,7 @@ class ImageConverter implements Converter {
 		// Use settings as provided by caller
 
 		// Process based on settings
-		if ( $settings['hybrid_approach'] && isset( $destination_paths[ Converter::FORMAT_WEBP ] ) && isset( $destination_paths[ Converter::FORMAT_AVIF ] ) ) {
+		if ( $settings['image_hybrid_approach'] && isset( $destination_paths[ Converter::FORMAT_WEBP ] ) && isset( $destination_paths[ Converter::FORMAT_AVIF ] ) ) {
 			// Hybrid approach - create both WebP and AVIF
 			$conversion_results = $this->convert_hybrid(
 				$source_path,
