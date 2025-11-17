@@ -156,7 +156,9 @@ class WordPressProvider {
         if( ! is_admin() ) {
             add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
         }
-        add_filter( 'wp_content_img_tag', [ $this, 'handle_content_images_filter' ], 10, 3 );
+        // Add converted files to attachment metadata so WordPress can match them naturally
+        add_filter( 'wp_get_attachment_metadata', [ $this, 'handle_attachment_metadata' ], 10, 2 );
+        add_filter( 'wp_content_img_tag', [ $this, 'handle_content_images_filter' ], 25, 3 );
         add_filter( 'the_content', [ $this, 'handle_post_content_images_filter' ], 20 );
         add_filter( 'render_block', [ $this, 'handle_render_block_filter' ], 10, 2 );
         
@@ -518,6 +520,76 @@ class WordPressProvider {
      */
     private function has_video_formats( $converted_files ) {
         return isset( $converted_files[ Converter::FORMAT_AV1 ] ) || isset( $converted_files[ Converter::FORMAT_WEBM ] );
+    }
+
+    /**
+     * Handle attachment metadata filter to add converted files.
+     *
+     * Adds converted files (AVIF/WebP) to the metadata sizes array so WordPress
+     * can naturally match them when getting dimensions. This ensures converted
+     * files are recognized as valid image sizes with the same dimensions as the original.
+     *
+     * @since TBD
+     * @param array|false $metadata       Metadata array or false if not found.
+     * @param int          $attachment_id  Attachment ID.
+     * @return array|false Modified metadata or false.
+     */
+    public function handle_attachment_metadata( $metadata, $attachment_id ) {
+        // If no metadata, return as-is
+        if ( ! is_array( $metadata ) || empty( $metadata ) ) {
+            return $metadata;
+        }
+        
+        // Get converted files for this attachment
+        $converted_files = $this->get_converted_files( $attachment_id );
+        if ( empty( $converted_files ) ) {
+            return $metadata;
+        }
+        
+        // Ensure sizes array exists
+        if ( ! isset( $metadata['sizes'] ) ) {
+            $metadata['sizes'] = [];
+        }
+        
+        // Get original file dimensions
+        $width = $metadata['width'] ?? 0;
+        $height = $metadata['height'] ?? 0;
+        
+        if ( ! $width || ! $height ) {
+            return $metadata;
+        }
+        
+        // Add converted files to sizes array so WordPress can match them
+        foreach ( $converted_files as $format => $file_path ) {
+            // Only process image formats (AVIF/WebP)
+            if ( $format !== Converter::FORMAT_AVIF && $format !== Converter::FORMAT_WEBP ) {
+                continue;
+            }
+            
+            // Get the filename from the file path
+            $filename = wp_basename( $file_path );
+            
+            // Create a size entry for the converted file
+            // Use format name as the size key (e.g., 'webp', 'avif')
+            $size_key = 'flux-' . $format;
+            
+            // Only add if not already present
+            if ( ! isset( $metadata['sizes'][ $size_key ] ) ) {
+                $metadata['sizes'][ $size_key ] = [
+                    'file' => $filename,
+                    'width' => $width,
+                    'height' => $height,
+                    'mime-type' => $format === Converter::FORMAT_AVIF ? 'image/avif' : 'image/webp',
+                ];
+                
+                // Add filesize if available
+                if ( file_exists( $file_path ) ) {
+                    $metadata['sizes'][ $size_key ]['filesize'] = filesize( $file_path );
+                }
+            }
+        }
+        
+        return $metadata;
     }
 
     /**

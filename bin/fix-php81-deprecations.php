@@ -34,16 +34,18 @@ foreach ( $files_to_fix as $relative_path => $methods ) {
 	
 	foreach ( $methods as $method ) {
 		// Check if attribute is already present
-		if ( preg_match( '/#\\\\ReturnTypeWillChange\]\s+public function ' . preg_quote( $method, '/' ) . '\s*\(/', $content ) ) {
+		if ( preg_match( '/#\[\\\\?ReturnTypeWillChange\]\s+public function ' . preg_quote( $method, '/' ) . '\s*\(/', $content ) ) {
 			continue; // Already fixed
 		}
 		
 		// Pattern to match method declarations without the attribute
-		// Matches: /** ... */ \n    public function methodName(
-		$pattern = '/(\s+\*\s+\{@inheritdoc\}\s*\n\s+)public function ' . preg_quote( $method, '/' ) . '\s*\(/';
+		// Matches: /** ... * {@inheritdoc} ... */ \n    public function methodName(
+		// Pattern captures: (docblock with {@inheritdoc} and closing */) (indentation) public function methodName(
+		$pattern = '/(\s+\*\s+\{@inheritdoc\}\s*\n\s+\*\/\s*\n)(\s+)public function ' . preg_quote( $method, '/' ) . '\s*\(/';
 		
-		// Add the attribute before the method
-		$replacement = '$1#[\ReturnTypeWillChange]' . "\n\tpublic function {$method}(";
+		// Add the attribute before the method (preserve indentation from capture group $2)
+		$replacement = '$1$2#[\ReturnTypeWillChange]' . "\n$2public function {$method}(";
+		
 		$new_content = preg_replace( $pattern, $replacement, $content );
 		
 		if ( $new_content !== $content ) {

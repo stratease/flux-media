@@ -373,12 +373,23 @@ class WordPressImageRenderer {
         // Get the size from block attributes, default to 'full'
         $size = $attributes['sizeSlug'] ?? 'full';
         
+        // Extract width and height from original block content
+        $dimensions = $this->extract_width_height_from_img( $block_content );
+        
         // Get image attributes for the fallback img tag
         $img_attributes = [
             'alt' => $attributes['alt'] ?? '',
             'class' => $attributes['className'] ?? '',
             'loading' => $attributes['loading'] ?? 'lazy',
         ];
+        
+        // Preserve width and height if they exist in the original
+        if ( ! empty( $dimensions['width'] ) ) {
+            $img_attributes['width'] = $dimensions['width'];
+        }
+        if ( ! empty( $dimensions['height'] ) ) {
+            $img_attributes['height'] = $dimensions['height'];
+        }
         
         // Extract wrapper attributes from the existing block content
         $wrapper_attributes = $this->extract_wrapper_attributes_from_block_content( $block_content );
@@ -577,6 +588,32 @@ class WordPressImageRenderer {
     }
 
     /**
+     * Extract width and height attributes from image HTML.
+     *
+     * @since TBD
+     * @param string $img_html The image HTML to extract attributes from.
+     * @return array Array with 'width' and 'height' keys, or empty strings if not found.
+     */
+    private function extract_width_height_from_img( $img_html ) {
+        $result = [
+            'width' => '',
+            'height' => '',
+        ];
+        
+        // Extract width attribute
+        if ( preg_match( '/width=["\']?(\d+)["\']?/i', $img_html, $matches ) ) {
+            $result['width'] = (int) $matches[1];
+        }
+        
+        // Extract height attribute
+        if ( preg_match( '/height=["\']?(\d+)["\']?/i', $img_html, $matches ) ) {
+            $result['height'] = (int) $matches[1];
+        }
+        
+        return $result;
+    }
+
+    /**
      * Get attachment ID from URL.
      *
      * @since 0.1.0
@@ -610,7 +647,6 @@ class WordPressImageRenderer {
      * @return string HTML for conversion status.
      */
     private function get_conversion_status_html( $attachment_id, $converted_files ) {
-        $upload_dir = wp_upload_dir();
         $original_file = get_attached_file( $attachment_id );
         $original_size = file_exists( $original_file ) ? filesize( $original_file ) : 0;
         $original_url = wp_get_attachment_url( $attachment_id );

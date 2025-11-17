@@ -21,7 +21,7 @@ class Settings {
 	 * @since 0.1.0
 	 */
 	const DEFAULT_WEBP_QUALITY = 75;
-	const DEFAULT_AVIF_QUALITY = 70;
+	const DEFAULT_AVIF_QUALITY = 55;
 	const DEFAULT_VIDEO_AV1_CRF = 28;
 	const DEFAULT_VIDEO_WEBM_CRF = 30;
 
