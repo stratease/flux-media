@@ -41,7 +41,6 @@
         "phpstan": "phpstan analyse",
         "phpcs": "phpcs --standard=WordPress app/ config/ database/ tests/",
         "phpcbf": "phpcbf --standard=WordPress app/ config/ database/ tests/",
-        "build": "./bin/build-plugin.sh",
         "quality": [
             "@phpcs",
             "@phpstan",
