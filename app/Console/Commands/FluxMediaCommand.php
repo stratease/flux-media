@@ -13,6 +13,7 @@ use WP_CLI_Command;
 use FluxMedia\App\Services\Logger;
 use FluxMedia\App\Services\BulkConverter;
 use FluxMedia\App\Services\Settings;
+use FluxMedia\App\Services\AttachmentMetaHandler;
 
 /**
  * WP-CLI command for managing Flux Media Optimizer conversions.
@@ -146,7 +147,8 @@ class FluxMediaCommand extends WP_CLI_Command {
         global $wpdb;
         
         // Get total converted files
-        $total_converted = $wpdb->get_var( "SELECT COUNT(*) FROM `".esc_sql($wpdb->postmeta)."` WHERE meta_key = '_flux_media_optimizer_converted_formats'" );
+        $meta_key = AttachmentMetaHandler::META_KEY_CONVERTED_FORMATS;
+        $total_converted = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = %s", $meta_key ) );
         
         // Get total file size savings
         $total_savings = $wpdb->get_var( "SELECT SUM(meta_value) FROM `".esc_sql($wpdb->postmeta)."` WHERE meta_key = '_flux_media_optimizer_file_size_savings'" );

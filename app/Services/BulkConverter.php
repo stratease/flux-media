@@ -11,6 +11,7 @@ namespace FluxMedia\App\Services;
 use FluxMedia\App\Services\Logger;
 use FluxMedia\App\Services\Settings;
 use FluxMedia\App\Services\Converter;
+use FluxMedia\App\Services\AttachmentMetaHandler;
 
 /**
  * Service for bulk conversion of existing media files.
@@ -117,7 +118,7 @@ class BulkConverter {
 				}
 
 				// Check if conversion is disabled for this attachment
-				if ( get_post_meta( $attachment_id, '_flux_media_optimizer_conversion_disabled', true ) ) {
+				if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
 					continue;
 				}
 
@@ -198,57 +199,200 @@ class BulkConverter {
 	/**
 	 * Process image conversion for bulk processing.
 	 *
+	 * Converts all WordPress image sizes (full, thumbnail, medium, large, etc.) to WebP/AVIF formats.
+	 *
 	 * @since 1.0.0
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $file_path Source file path.
 	 * @return array Conversion results.
 	 */
 	private function process_image_conversion( $attachment_id, $file_path ) {
-		// Get upload directory info
-		$file_info = pathinfo( $file_path );
-		$file_dir = $file_info['dirname'];
-		$file_name = $file_info['filename'];
+		// Get all image sizes for this attachment
+		$image_sizes = $this->get_all_image_paths_by_size( $attachment_id );
+		
+		if ( empty( $image_sizes ) ) {
+			return [
+				'success' => false,
+				'errors' => ['No image sizes found'],
+			];
+		}
 
 		// Get settings from WordPress
 		$settings = [
-			'image_hybrid_approach' => Settings::is_image_hybrid_approach_enabled(),
 			'webp_quality' => Settings::get_webp_quality(),
 			'avif_quality' => Settings::get_avif_quality(),
 			'avif_speed' => Settings::get_avif_speed(),
 		];
 
-		// Create destination paths for requested formats
-		$destination_paths = [];
+		// Get image formats to convert
 		$image_formats = Settings::get_image_formats();
 		
-		foreach ( $image_formats as $format ) {
-			$destination_paths[ $format ] = $file_dir . '/' . $file_name . '.' . $format;
+		// Store converted files organized by size
+		$all_converted_files_by_size = [];
+		$all_converted_formats = [];
+		$total_original_size = 0;
+
+		// Initialize WordPress filesystem for file operations
+		if ( ! function_exists( 'WP_Filesystem' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		WP_Filesystem();
+		
+		global $wp_filesystem;
+		
+		if ( ! $wp_filesystem ) {
+			return [
+				'success' => false,
+				'errors' => ['WordPress filesystem not available'],
+			];
 		}
 
-		// Process the image
-		$results = $this->image_converter->process_image( $file_path, $destination_paths, $settings );
-
-		// Handle results
-		if ( $results['success'] ) {
-			// Get original file size
-			$original_size = file_exists( $file_path ) ? filesize( $file_path ) : 0;
-
-			// Record conversion with file size data for each format
-			// Quota tracking is handled automatically in record_conversion()
-			foreach ( $results['converted_formats'] as $format ) {
-				$converted_file_path = $results['converted_files'][ $format ] ?? '';
-				$converted_size = file_exists( $converted_file_path ) ? filesize( $converted_file_path ) : 0;
-				
-				$this->conversion_tracker->record_conversion( $attachment_id, $format, $original_size, $converted_size );
+		// Convert each image size
+		foreach ( $image_sizes as $size_name => $size_data ) {
+			$size_file_path = $size_data['file_path'];
+			
+			// Skip if size file doesn't exist (use WordPress filesystem)
+			if ( ! $wp_filesystem->exists( $size_file_path ) ) {
+				continue;
 			}
-
-			// Update WordPress meta
-			update_post_meta( $attachment_id, '_flux_media_optimizer_converted_formats', $results['converted_formats'] );
-			update_post_meta( $attachment_id, '_flux_media_optimizer_conversion_date', current_time( 'mysql' ) );
-			update_post_meta( $attachment_id, '_flux_media_optimizer_converted_files', $results['converted_files'] );
+			
+			// Get size file info using PHP path functions
+			$size_file_path_normalized = wp_normalize_path( $size_file_path );
+			$size_file_dir = dirname( $size_file_path_normalized );
+			$size_file_info = pathinfo( $size_file_path_normalized );
+			$size_file_name = $size_file_info['filename'];
+			
+			// Create destination paths for this size
+			$destination_paths = [];
+			foreach ( $image_formats as $format ) {
+				$destination_paths[ $format ] = trailingslashit( $size_file_dir ) . $size_file_name . '.' . $format;
+			}
+			
+			// Process this size
+			$results = $this->image_converter->process_image( $size_file_path, $destination_paths, $settings );
+			
+			if ( $results['success'] ) {
+				// Get original size file size using WordPress filesystem
+				$size_original_size = $wp_filesystem->exists( $size_file_path ) ? $wp_filesystem->size( $size_file_path ) : 0;
+				
+				// Store converted files for this size
+				if ( ! isset( $all_converted_files_by_size[ $size_name ] ) ) {
+					$all_converted_files_by_size[ $size_name ] = [];
+				}
+				
+				// Record conversion and store files for each format
+				foreach ( $results['converted_formats'] as $format ) {
+					$converted_file_path = $results['converted_files'][ $format ] ?? '';
+					if ( empty( $converted_file_path ) ) {
+						continue;
+					}
+					
+					$converted_size = $wp_filesystem->exists( $converted_file_path ) ? $wp_filesystem->size( $converted_file_path ) : 0;
+					
+					// Record conversion for quota tracking (track all sizes for accurate savings calculation)
+					$this->conversion_tracker->record_conversion( $attachment_id, $format, $size_original_size, $converted_size, $size_name );
+					
+					// Track full size original for total calculation
+					if ( 'full' === $size_name ) {
+						$total_original_size = $size_original_size;
+					}
+					
+					// Store converted file
+					$all_converted_files_by_size[ $size_name ][ $format ] = $converted_file_path;
+					
+					// Track formats
+					if ( ! in_array( $format, $all_converted_formats, true ) ) {
+						$all_converted_formats[] = $format;
+					}
+				}
+			} else {
+				$this->logger->warning( "Image conversion failed for attachment {$attachment_id}, size {$size_name}: " . implode( ', ', $results['errors'] ?? [] ) );
+			}
 		}
 
-		return $results;
+		// Update WordPress meta with all converted files (organized by size)
+		if ( ! empty( $all_converted_files_by_size ) ) {
+			// Store in size-specific meta
+			AttachmentMetaHandler::set_converted_files_by_size( $attachment_id, $all_converted_files_by_size );
+			
+			// Also store full size in legacy format for backward compatibility
+			if ( isset( $all_converted_files_by_size['full'] ) ) {
+				AttachmentMetaHandler::set_converted_files( $attachment_id, $all_converted_files_by_size['full'] );
+			}
+			
+			AttachmentMetaHandler::set_converted_formats( $attachment_id, $all_converted_formats );
+			AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
+			
+			return [
+				'success' => true,
+				'converted_formats' => $all_converted_formats,
+				'converted_files' => $all_converted_files_by_size,
+			];
+		}
+		
+		return [
+			'success' => false,
+			'errors' => ['No sizes were successfully converted'],
+		];
+	}
+
+	/**
+	 * Get all image paths by size for an attachment.
+	 *
+	 * Retrieves file paths for all WordPress image sizes including 'full' and all intermediate sizes.
+	 *
+	 * @since 1.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return array Array of size_name => ['file_path' => path, 'width' => int, 'height' => int].
+	 */
+	private function get_all_image_paths_by_size( $attachment_id ) {
+		$sizes = [];
+		
+		// Initialize WordPress filesystem
+		if ( ! function_exists( 'WP_Filesystem' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		WP_Filesystem();
+		
+		global $wp_filesystem;
+		
+		if ( ! $wp_filesystem ) {
+			return $sizes;
+		}
+		
+		// Add full size
+		$full_file_path = get_attached_file( $attachment_id );
+		if ( $full_file_path && $wp_filesystem->exists( $full_file_path ) ) {
+			$metadata = wp_get_attachment_metadata( $attachment_id );
+			$sizes['full'] = [
+				'file_path' => wp_normalize_path( $full_file_path ),
+				'width' => $metadata['width'] ?? 0,
+				'height' => $metadata['height'] ?? 0,
+			];
+		}
+		
+		// Get all intermediate sizes
+		$metadata = wp_get_attachment_metadata( $attachment_id );
+		if ( ! empty( $metadata['sizes'] ) && ! empty( $full_file_path ) ) {
+			// Build directory path using PHP dirname function
+			$file_dir = dirname( wp_normalize_path( $full_file_path ) );
+			
+			foreach ( $metadata['sizes'] as $size_name => $size_data ) {
+				// Build full path to size file using WordPress path functions
+				$size_file_path = trailingslashit( $file_dir ) . $size_data['file'];
+				$size_file_path = wp_normalize_path( $size_file_path );
+				
+				if ( $wp_filesystem->exists( $size_file_path ) ) {
+					$sizes[ $size_name ] = [
+						'file_path' => $size_file_path,
+						'width' => $size_data['width'] ?? 0,
+						'height' => $size_data['height'] ?? 0,
+					];
+				}
+			}
+		}
+		
+		return $sizes;
 	}
 
 	/**
@@ -296,18 +440,18 @@ class BulkConverter {
 			$original_size = file_exists( $file_path ) ? filesize( $file_path ) : 0;
 
 			// Record conversion with file size data for each format
-			// Quota tracking is handled automatically in record_conversion()
+			// Videos don't have multiple sizes, so use 'full' as size_name
 			foreach ( $results['converted_formats'] as $format ) {
 				$converted_file_path = $results['converted_files'][ $format ] ?? '';
 				$converted_size = file_exists( $converted_file_path ) ? filesize( $converted_file_path ) : 0;
 				
-				$this->conversion_tracker->record_conversion( $attachment_id, $format, $original_size, $converted_size );
+				$this->conversion_tracker->record_conversion( $attachment_id, $format, $original_size, $converted_size, 'full' );
 			}
 
 			// Update WordPress meta
-			update_post_meta( $attachment_id, '_flux_media_optimizer_converted_formats', $results['converted_formats'] );
-			update_post_meta( $attachment_id, '_flux_media_optimizer_conversion_date', current_time( 'mysql' ) );
-			update_post_meta( $attachment_id, '_flux_media_optimizer_converted_files', $results['converted_files'] );
+			AttachmentMetaHandler::set_converted_formats( $attachment_id, $results['converted_formats'] );
+			AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
+			AttachmentMetaHandler::set_converted_files( $attachment_id, $results['converted_files'] );
 		}
 
 		return $results;

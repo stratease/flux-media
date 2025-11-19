@@ -10,6 +10,7 @@ namespace FluxMedia\App\Services;
 
 use FluxMedia\App\Services\Converter;
 use FluxMedia\App\Services\Settings;
+use FluxMedia\App\Services\AttachmentMetaHandler;
 
 /**
  * WordPress video renderer for handling video display and optimization.
@@ -98,7 +99,7 @@ class WordPressVideoRenderer {
         }
 
         // Get converted files
-        $converted_files = get_post_meta( $attachment_id, '_flux_media_optimizer_converted_files', true );
+        $converted_files = AttachmentMetaHandler::get_converted_files( $attachment_id );
         if ( empty( $converted_files ) ) {
             return $block_content;
         }
@@ -138,7 +139,7 @@ class WordPressVideoRenderer {
                 }
                 
                 // Get converted files
-                $converted_files = get_post_meta( $attachment_id, '_flux_media_optimizer_converted_files', true );
+                $converted_files = AttachmentMetaHandler::get_converted_files( $attachment_id );
                 if ( empty( $converted_files ) ) {
                     return $full_match;
                 }

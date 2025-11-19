@@ -49,14 +49,15 @@ class ConversionTracker {
 	/**
 	 * Record a conversion for an attachment.
 	 *
-	 * @since 0.1.0
+	 * @since 1.0.0
 	 * @param int    $attachment_id WordPress attachment ID.
 	 * @param string $file_type File type (webp, avif, av1, webm).
 	 * @param int    $original_size Original file size in bytes.
 	 * @param int    $converted_size Converted file size in bytes.
+	 * @param string $size_name Image size name (full, thumbnail, medium, etc.). Default 'full'.
 	 * @return bool True on success, false on failure.
 	 */
-	public function record_conversion( $attachment_id, $file_type, $original_size = 0, $converted_size = 0 ) {
+	public function record_conversion( $attachment_id, $file_type, $original_size = 0, $converted_size = 0, $size_name = 'full' ) {
 		global $wpdb;
 
 		// Validate inputs
@@ -64,13 +65,18 @@ class ConversionTracker {
 			return false;
 		}
 
+		// Ensure size_name is valid (default to 'full' if empty)
+		if ( empty( $size_name ) ) {
+			$size_name = 'full';
+		}
+
 		// Calculate savings
 		$size_savings = max( 0, $original_size - $converted_size );
 
 		// Use INSERT ... ON DUPLICATE KEY UPDATE for atomic operation
 		$result = $wpdb->query( $wpdb->prepare(
-			"INSERT INTO {$this->table_name} (attachment_id, file_type, original_size, converted_size, size_savings, converted_at) 
-			 VALUES (%d, %s, %d, %d, %d, %s) 
+			"INSERT INTO {$this->table_name} (attachment_id, file_type, size_name, original_size, converted_size, size_savings, converted_at) 
+			 VALUES (%d, %s, %s, %d, %d, %d, %s) 
 			 ON DUPLICATE KEY UPDATE 
 			 original_size = VALUES(original_size),
 			 converted_size = VALUES(converted_size),
@@ -78,6 +84,7 @@ class ConversionTracker {
 			 converted_at = VALUES(converted_at)",
 			$attachment_id,
 			$file_type,
+			$size_name,
 			$original_size,
 			$converted_size,
 			$size_savings,
@@ -85,8 +92,6 @@ class ConversionTracker {
 		) );
 
 		if ( $result !== false ) {
-			$this->logger->info( "Conversion recorded for attachment {$attachment_id}, type {$file_type}" );
-			
 			// Clear related caches
 			wp_cache_delete( 'flux_media_optimizer_conversion_stats', 'flux_media_optimizer' );
 			wp_cache_delete( 'flux_media_optimizer_savings_stats', 'flux_media_optimizer' );
@@ -99,9 +104,11 @@ class ConversionTracker {
 	/**
 	 * Get all conversions for an attachment.
 	 *
-	 * @since 0.1.0
+	 * Includes all sizes (full, thumbnail, medium, etc.).
+	 *
+	 * @since 1.0.0
 	 * @param int $attachment_id WordPress attachment ID.
-	 * @return array Array of conversion records.
+	 * @return array Array of conversion records with size_name included.
 	 */
 	public function get_attachment_conversions( $attachment_id ) {
 		global $wpdb;
@@ -111,8 +118,8 @@ class ConversionTracker {
 		}
 
 		$results = $wpdb->get_results( $wpdb->prepare(
-			"SELECT file_type, original_size, converted_size, size_savings, converted_at 
-			 FROM {$this->table_name} WHERE attachment_id = %d ORDER BY converted_at DESC",
+			"SELECT file_type, size_name, original_size, converted_size, size_savings, converted_at 
+			 FROM {$this->table_name} WHERE attachment_id = %d ORDER BY size_name, file_type, converted_at DESC",
 			$attachment_id
 		), ARRAY_A );
 
@@ -197,7 +204,9 @@ class ConversionTracker {
 	/**
 	 * Get conversion statistics.
 	 *
-	 * @since 0.1.0
+	 * Includes all sizes in the count (full, thumbnail, medium, etc.).
+	 *
+	 * @since 1.0.0
 	 * @return array Statistics array.
 	 */
 	public function get_conversion_stats() {
@@ -236,7 +245,9 @@ class ConversionTracker {
 	/**
 	 * Get aggregate file size savings statistics.
 	 *
-	 * @since 0.1.0
+	 * Includes savings from all sizes (full, thumbnail, medium, etc.) for accurate totals.
+	 *
+	 * @since 1.0.0
 	 * @return array Savings statistics array.
 	 */
 	public function get_savings_stats() {
@@ -304,7 +315,9 @@ class ConversionTracker {
 	/**
 	 * Get conversion statistics for a specific attachment.
 	 *
-	 * @since 0.1.0
+	 * Includes all sizes (full, thumbnail, medium, etc.) for accurate totals.
+	 *
+	 * @since 1.0.0
 	 * @param int $attachment_id WordPress attachment ID.
 	 * @return array Attachment conversion statistics.
 	 */

@@ -31,14 +31,16 @@ class Database {
 			id bigint(20) NOT NULL AUTO_INCREMENT,
 			attachment_id bigint(20) NOT NULL,
 			file_type varchar(10) NOT NULL,
+			size_name varchar(50) DEFAULT 'full',
 			original_size bigint(20) DEFAULT 0,
 			converted_size bigint(20) DEFAULT 0,
 			size_savings bigint(20) DEFAULT 0,
 			converted_at datetime DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
-			UNIQUE KEY unique_conversion (attachment_id, file_type),
+			UNIQUE KEY unique_conversion (attachment_id, file_type, size_name),
 			KEY attachment_id (attachment_id),
 			KEY file_type (file_type),
+			KEY size_name (size_name),
 			KEY converted_at (converted_at)
 		) $charset_collate;";
 
@@ -113,7 +115,7 @@ class Database {
 	/**
 	 * Update database if needed.
 	 *
-	 * @since 0.1.0
+	 * @since 1.0.0
 	 */
 	public static function maybe_update_database() {
 		$current_version = self::get_db_version();
