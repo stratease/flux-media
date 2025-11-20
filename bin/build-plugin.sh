@@ -8,18 +8,155 @@ set -e
 # Get the plugin directory (parent of scripts directory)
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_NAME="flux-media-optimizer"
+PLUGIN_FILE="$PLUGIN_DIR/flux-media-optimizer.php"
+PACKAGE_JSON="$PLUGIN_DIR/package.json"
 
-# Try to extract version from main plugin file, fallback to timestamp
-if [ -f "$PLUGIN_DIR/flux-media-optimizer.php" ]; then
-    VERSION=$(grep "Version:" "$PLUGIN_DIR/flux-media-optimizer.php" | sed 's/.*Version:[[:space:]]*//' | tr -d '\r\n' | tr -d ' ')
+# Function to extract version from plugin file header
+extract_plugin_header_version() {
+    if [ -f "$PLUGIN_FILE" ]; then
+        grep "Version:" "$PLUGIN_FILE" | sed 's/.*Version:[[:space:]]*//' | tr -d '\r\n' | tr -d ' ' | head -1
+    fi
+}
+
+# Function to extract version from PHP constant
+extract_php_constant_version() {
+    if [ -f "$PLUGIN_FILE" ]; then
+        # Use sed instead of grep -P for better compatibility (macOS doesn't support -P)
+        grep "FLUX_MEDIA_OPTIMIZER_VERSION" "$PLUGIN_FILE" | sed -n "s/.*'FLUX_MEDIA_OPTIMIZER_VERSION',[[:space:]]*'\([^']*\)'.*/\1/p" | head -1
+    fi
+}
+
+# Function to extract version from package.json
+extract_package_json_version() {
+    if [ -f "$PACKAGE_JSON" ]; then
+        grep '"version"' "$PACKAGE_JSON" | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1
+    fi
+}
+
+# Function to validate version format (semver: x.y.z)
+validate_version() {
+    local version=$1
+    if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Extract current versions
+CURRENT_HEADER_VERSION=$(extract_plugin_header_version)
+CURRENT_CONSTANT_VERSION=$(extract_php_constant_version)
+CURRENT_PACKAGE_VERSION=$(extract_package_json_version)
+
+# Determine current version (prefer header, fallback to constant, then package.json)
+CURRENT_VERSION="$CURRENT_HEADER_VERSION"
+if [ -z "$CURRENT_VERSION" ]; then
+    CURRENT_VERSION="$CURRENT_CONSTANT_VERSION"
+fi
+if [ -z "$CURRENT_VERSION" ]; then
+    CURRENT_VERSION="$CURRENT_PACKAGE_VERSION"
+fi
+
+# If still no version found, use timestamp
+if [ -z "$CURRENT_VERSION" ] || [[ "$CURRENT_VERSION" == *"*"* ]]; then
+    CURRENT_VERSION="$(date +%Y%m%d-%H%M%S)"
+fi
+
+# Display current version information
+echo "📋 Current Version Information:"
+echo "   Plugin Header: ${CURRENT_HEADER_VERSION:-not found}"
+echo "   PHP Constant:  ${CURRENT_CONSTANT_VERSION:-not found}"
+echo "   package.json:  ${CURRENT_PACKAGE_VERSION:-not found}"
+echo ""
+
+# Prompt for version
+echo "🔢 Version Selection:"
+echo "   Current version: $CURRENT_VERSION"
+read -p "   Enter new version (or press Enter to keep current): " NEW_VERSION
+
+# Use current version if empty
+if [ -z "$NEW_VERSION" ]; then
+    NEW_VERSION="$CURRENT_VERSION"
+    echo "   Using current version: $NEW_VERSION"
 else
-    VERSION="$(date +%Y%m%d-%H%M%S)"
+    # Validate version format
+    if ! validate_version "$NEW_VERSION"; then
+        echo "   ⚠️  Warning: Version format may be invalid (expected: x.y.z or x.y.z-suffix)"
+        read -p "   Continue anyway? (y/N): " CONFIRM
+        if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+            echo "❌ Build cancelled."
+            exit 1
+        fi
+    fi
+    
+    # Update version in plugin file
+    echo "   Updating version in plugin file..."
+    
+    # Update plugin header version
+    if [ -f "$PLUGIN_FILE" ]; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS sed
+            sed -i '' "s/Version:[[:space:]]*[0-9.]*/Version: $NEW_VERSION/" "$PLUGIN_FILE"
+        else
+            # Linux sed
+            sed -i "s/Version:[[:space:]]*[0-9.]*/Version: $NEW_VERSION/" "$PLUGIN_FILE"
+        fi
+    fi
+    
+    # Update PHP constant version
+    if [ -f "$PLUGIN_FILE" ]; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS sed - escape single quotes properly
+            sed -i '' "s/define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '[^']*' );/define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '$NEW_VERSION' );/" "$PLUGIN_FILE"
+        else
+            # Linux sed - escape single quotes properly
+            sed -i "s/define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '[^']*' );/define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '$NEW_VERSION' );/" "$PLUGIN_FILE"
+        fi
+        # Verify the update worked
+        UPDATED_CONSTANT=$(extract_php_constant_version)
+        if [ "$UPDATED_CONSTANT" != "$NEW_VERSION" ]; then
+            echo "   ⚠️  Warning: PHP constant may not have updated correctly. Please verify manually."
+        fi
+    fi
+    
+    # Update package.json version
+    if [ -f "$PACKAGE_JSON" ]; then
+        if command -v npm &> /dev/null; then
+            npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version > /dev/null 2>&1 || {
+                # Fallback to sed if npm version fails
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    sed -i '' "s/\"version\":[[:space:]]*\"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+                else
+                    sed -i "s/\"version\":[[:space:]]*\"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+                fi
+            }
+        else
+            # Fallback to sed if npm is not available
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s/\"version\":[[:space:]]*\"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+            else
+                sed -i "s/\"version\":[[:space:]]*\"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+            fi
+        fi
+    fi
+    
+    echo "   ✅ Version updated to: $NEW_VERSION"
 fi
 
-# If version is empty or contains wildcards, use timestamp
-if [ -z "$VERSION" ] || [[ "$VERSION" == *"*"* ]]; then
-    VERSION="$(date +%Y%m%d-%H%M%S)"
+# Set version for build
+VERSION="$NEW_VERSION"
+
+# Confirm build
+echo ""
+echo "🚀 Build Configuration:"
+echo "   Version: $VERSION"
+echo "   Output: ${PLUGIN_NAME}-v${VERSION}.zip"
+read -p "   Proceed with build? (Y/n): " CONFIRM_BUILD
+if [[ "$CONFIRM_BUILD" =~ ^[Nn]$ ]]; then
+    echo "❌ Build cancelled."
+    exit 1
 fi
+echo ""
 
 # Create build directory
 BUILD_DIR="$PLUGIN_DIR"
@@ -30,6 +167,7 @@ ZIP_FILE="$BUILD_DIR/${PLUGIN_NAME}-v${VERSION}.zip"
 
 # Remove existing zip if it exists
 if [ -f "$ZIP_FILE" ]; then
+    echo "🗑️  Removing existing zip file..."
     rm "$ZIP_FILE"
 fi
 
@@ -95,5 +233,9 @@ echo "🔄 Restoring development environment..."
 
 composer install --ignore-platform-reqs --optimize-autoloader --no-interaction
 
-echo "✅ Plugin built successfully: $ZIP_FILE"
-echo "📦 File size: $(du -h "$ZIP_FILE" | cut -f1)"
+echo ""
+echo "✅ Plugin built successfully!"
+echo "📦 File: $ZIP_FILE"
+echo "📏 Size: $(du -h "$ZIP_FILE" | cut -f1)"
+echo "🏷️  Version: $VERSION"
+echo ""
