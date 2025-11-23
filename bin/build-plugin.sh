@@ -74,11 +74,15 @@ echo "🔢 Version Selection:"
 echo "   Current version: $CURRENT_VERSION"
 read -p "   Enter new version (or press Enter to keep current): " NEW_VERSION
 
+# Track if version is being bumped
+VERSION_BUMPED=false
+
 # Use current version if empty
 if [ -z "$NEW_VERSION" ]; then
     NEW_VERSION="$CURRENT_VERSION"
     echo "   Using current version: $NEW_VERSION"
 else
+    VERSION_BUMPED=true
     # Validate version format
     if ! validate_version "$NEW_VERSION"; then
         echo "   ⚠️  Warning: Version format may be invalid (expected: x.y.z or x.y.z-suffix)"
@@ -141,6 +145,16 @@ else
     fi
     
     echo "   ✅ Version updated to: $NEW_VERSION"
+fi
+
+# Output git tag command if version was bumped
+if [ "$VERSION_BUMPED" = true ]; then
+    TAG_NAME="v${NEW_VERSION}"
+    echo ""
+    echo "🏷️  Git Tag Command (run after committing version changes):"
+    echo "   git tag -a $TAG_NAME -m \"Release version $NEW_VERSION\""
+    echo "   git push origin $TAG_NAME"
+    echo ""
 fi
 
 # Set version for build

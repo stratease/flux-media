@@ -792,6 +792,13 @@ class WordPressImageRenderer {
      * @return int|null Attachment ID or null if not found.
      */
     private function get_attachment_id_from_url( $url ) {
+        // Use WordPress built-in function first (more reliable)
+        $attachment_id = attachment_url_to_postid( $url );
+        if ( $attachment_id ) {
+            return $attachment_id;
+        }
+        
+        // Fallback to database query for edge cases
         global $wpdb;
         
         $upload_dir = wp_upload_dir();

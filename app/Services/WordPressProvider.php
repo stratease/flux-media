@@ -154,8 +154,16 @@ class WordPressProvider {
 
         // ===== RENDER IMAGE =====
         // Image rendering hooks - all hooks are registered, hybrid approach is checked inside each callback
-        if( ! is_admin() ) {
+        // Enable filters for frontend, REST API requests, and admin (except media library pages)
+        // This ensures editor gets converted URLs when saving blocks, while avoiding confusion in media library
+        if( ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ! $this->is_media_library_page() ) {
+            // Filter all WordPress functions that return attachment URLs
+            // These are the primary hooks that blocks/plugins use to get image URLs
+            // When blocks are saved in the editor, REST API requests these URLs, and we convert them here
+            // The converted URL is then stored in block attributes, so CSS generation gets the converted URL
             add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
+            add_filter( 'wp_get_attachment_image_url', [ $this, 'handle_attachment_image_url_filter' ], 10, 3 );
+            add_filter( 'wp_get_attachment_image_src', [ $this, 'handle_attachment_image_src_filter' ], 10, 4 );
         }
         // Add converted files to attachment metadata so WordPress can match them naturally
         add_filter( 'wp_get_attachment_metadata', [ $this, 'handle_attachment_metadata' ], 10, 2 );
@@ -746,6 +754,52 @@ class WordPressProvider {
     }
 
     /**
+     * Check if we're on a media library page in the admin.
+     *
+     * We exclude media library pages from URL conversion filters to avoid
+     * showing converted URLs in the admin interface, which could be confusing.
+     *
+     * @since 1.0.2
+     * @return bool True if on a media library page, false otherwise.
+     */
+    private function is_media_library_page() {
+        if ( ! is_admin() ) {
+            return false;
+        }
+
+        // Check using get_current_screen() if available (most reliable)
+        if ( function_exists( 'get_current_screen' ) ) {
+            $screen = get_current_screen();
+            if ( $screen && ( 'upload' === $screen->id || 'attachment' === $screen->post_type ) ) {
+                return true;
+            }
+        }
+
+        // Fallback: check global $pagenow and query vars
+        global $pagenow;
+        if ( 'upload.php' === $pagenow ) {
+            return true;
+        }
+
+        if ( in_array( $pagenow, [ 'post.php', 'post-new.php' ], true ) ) {
+            $post_type = isset( $_GET['post_type'] ) ? sanitize_text_field( wp_unslash( $_GET['post_type'] ) ) : '';
+            if ( 'attachment' === $post_type ) {
+                return true;
+            }
+
+            // Also check if editing an attachment post
+            if ( isset( $_GET['post'] ) ) {
+                $post_id = absint( $_GET['post'] );
+                if ( $post_id && 'attachment' === get_post_type( $post_id ) ) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Handle attachment metadata updates to convert sizes as they're generated.
      *
      * Detects when new image sizes are added to metadata and converts them to WebP/AVIF.
@@ -1050,6 +1104,105 @@ class WordPressProvider {
         }
 
         return $url;
+    }
+
+    /**
+     * Handle attachment image URL filter.
+     *
+     * Filters wp_get_attachment_image_url() which is commonly used by blocks/plugins
+     * to get image URLs for CSS backgrounds and other purposes.
+     *
+     * @since 1.0.2
+     * @param string|false $url         The attachment image URL or false if no image is available.
+     * @param int          $attachment_id Image attachment ID.
+     * @param string|int[] $size        Requested image size.
+     * @return string|false Modified URL or false.
+     */
+    public function handle_attachment_image_url_filter( $url, $attachment_id, $size ) {
+        if ( ! $url || ! $attachment_id ) {
+            return $url;
+        }
+
+        // Get converted files (check size-specific structure first, fallback to legacy)
+        $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
+        
+        // Determine size name for lookup
+        $size_name = is_array( $size ) ? 'full' : ( $size ?: 'full' );
+        
+        $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size[ $size_name ] ) 
+            ? $converted_files_by_size[ $size_name ] 
+            : ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
+                ? $converted_files_by_size['full'] 
+                : $this->get_converted_files( $attachment_id ) );
+        
+        if ( empty( $converted_files ) ) {
+            return $url;
+        }
+
+        // Determine media type and use appropriate renderer
+        if ( $this->has_video_formats( $converted_files ) ) {
+            return $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        } elseif ( $this->has_image_formats( $converted_files ) ) {
+            return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        }
+
+        return $url;
+    }
+
+    /**
+     * Handle attachment image src filter.
+     *
+     * Filters wp_get_attachment_image_src() which returns an array with URL, width, height.
+     * This is commonly used by blocks/plugins (like Otter Blocks) to get image URLs for CSS backgrounds.
+     *
+     * @since 1.0.2
+     * @param array|false  $image         Array of image data (url, width, height) or false if no image.
+     * @param int          $attachment_id Image attachment ID.
+     * @param string|int[] $size          Requested image size.
+     * @param bool         $icon          Whether the image should be treated as an icon.
+     * @return array|false Modified image array or false.
+     */
+    public function handle_attachment_image_src_filter( $image, $attachment_id, $size, $icon ) {
+        if ( ! $image || ! is_array( $image ) || ! $attachment_id || $icon ) {
+            return $image;
+        }
+
+        // Get the URL from the image array
+        $url = $image[0] ?? '';
+        if ( empty( $url ) ) {
+            return $image;
+        }
+
+        // Get converted files (check size-specific structure first, fallback to legacy)
+        $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
+        
+        // Determine size name for lookup
+        $size_name = is_array( $size ) ? 'full' : ( $size ?: 'full' );
+        
+        $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size[ $size_name ] ) 
+            ? $converted_files_by_size[ $size_name ] 
+            : ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
+                ? $converted_files_by_size['full'] 
+                : $this->get_converted_files( $attachment_id ) );
+        
+        if ( empty( $converted_files ) ) {
+            return $image;
+        }
+
+        // Determine media type and use appropriate renderer
+        $modified_url = $url;
+        if ( $this->has_video_formats( $converted_files ) ) {
+            $modified_url = $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        } elseif ( $this->has_image_formats( $converted_files ) ) {
+            $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        }
+
+        // Update the URL in the image array if it was modified
+        if ( $modified_url !== $url ) {
+            $image[0] = $modified_url;
+        }
+
+        return $image;
     }
 
     /**
