@@ -26,21 +26,36 @@ class WordPressVideoRenderer {
      * @param string $url The original attachment URL.
      * @param int    $attachment_id The attachment ID.
      * @param array  $converted_files Array of converted file paths.
-     * @return string Modified URL.
+     * @return string Modified URL (always returns original URL as fallback, never null or empty).
      */
     public function modify_attachment_url( $url, $attachment_id, $converted_files ) {
+        // Always ensure we have a valid URL to return
+        if ( empty( $url ) ) {
+            return $url;
+        }
+
         if ( empty( $converted_files ) ) {
             return $url;
         }
 
         // For videos: Use priority AV1 > WebM (single format approach)
         // When hybrid approach is enabled, we still return the best format for direct URL access
+        // Always check for null/empty returns and fallback to original URL
         if ( isset( $converted_files[ Converter::FORMAT_AV1 ] ) ) {
-            return WordPressImageRenderer::get_image_url_from_file_path( $converted_files[ Converter::FORMAT_AV1 ] );
-        } elseif ( isset( $converted_files[ Converter::FORMAT_WEBM ] ) ) {
-            return WordPressImageRenderer::get_image_url_from_file_path( $converted_files[ Converter::FORMAT_WEBM ] );
+            $converted_url = WordPressImageRenderer::get_image_url_from_file_path( $converted_files[ Converter::FORMAT_AV1 ] );
+            if ( ! empty( $converted_url ) ) {
+                return $converted_url;
+            }
+        }
+        
+        if ( isset( $converted_files[ Converter::FORMAT_WEBM ] ) ) {
+            $converted_url = WordPressImageRenderer::get_image_url_from_file_path( $converted_files[ Converter::FORMAT_WEBM ] );
+            if ( ! empty( $converted_url ) ) {
+                return $converted_url;
+            }
         }
 
+        // Always return original URL as fallback (never null or empty)
         return $url;
     }
 

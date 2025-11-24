@@ -194,20 +194,35 @@ class WordPressImageRenderer {
      * @param string $url The original attachment URL.
      * @param int    $attachment_id The attachment ID.
      * @param array  $converted_files Array of converted file paths.
-     * @return string Modified URL.
+     * @return string Modified URL (always returns original URL as fallback, never null or empty).
      */
     public function modify_attachment_url( $url, $attachment_id, $converted_files ) {
+        // Always ensure we have a valid URL to return
+        if ( empty( $url ) ) {
+            return $url;
+        }
+
         if ( empty( $converted_files ) ) {
             return $url;
         }
 
         // For images: Use priority AVIF > WebP
+        // Always check for null/empty returns and fallback to original URL
         if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
-            return self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
-        } elseif ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-            return self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
+            $converted_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
+            if ( ! empty( $converted_url ) ) {
+                return $converted_url;
+            }
+        }
+        
+        if ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $converted_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
+            if ( ! empty( $converted_url ) ) {
+                return $converted_url;
+            }
         }
 
+        // Always return original URL as fallback (never null or empty)
         return $url;
     }
 

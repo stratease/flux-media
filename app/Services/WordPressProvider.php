@@ -165,6 +165,10 @@ class WordPressProvider {
             add_filter( 'wp_get_attachment_image_url', [ $this, 'handle_attachment_image_url_filter' ], 10, 3 );
             add_filter( 'wp_get_attachment_image_src', [ $this, 'handle_attachment_image_src_filter' ], 10, 4 );
         }
+        
+        // Hook into REST API to modify attachment responses directly
+        // This ensures block editor gets converted URLs in REST API responses
+        add_filter( 'rest_prepare_attachment', [ $this, 'handle_rest_prepare_attachment' ], 10, 3 );
         // Add converted files to attachment metadata so WordPress can match them naturally
         add_filter( 'wp_get_attachment_metadata', [ $this, 'handle_attachment_metadata' ], 10, 2 );
         // Hook into metadata updates to convert sizes as they're generated
@@ -307,9 +311,62 @@ class WordPressProvider {
             return;
         }
 
-        // Store converted files organized by size
-        $all_converted_files_by_size = [];
-        $all_converted_formats = [];
+        // Get existing converted files to preserve them during reconversion
+        // This prevents losing existing formats (AVIF/WebP) when reconverting
+        $all_converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
+        if ( ! is_array( $all_converted_files_by_size ) ) {
+            $all_converted_files_by_size = [];
+        }
+        
+        // Clean up formats that are no longer enabled in settings
+        // Remove files, metadata, and tracking records for disabled formats
+        $disabled_formats_removed = false;
+        $disabled_formats_to_clean = [];
+        
+        foreach ( $all_converted_files_by_size as $size_name => $size_formats ) {
+            if ( ! is_array( $size_formats ) ) {
+                continue;
+            }
+            
+            foreach ( $size_formats as $format => $file_path ) {
+                // If this format is not in the enabled formats list, remove it
+                if ( ! in_array( $format, $image_formats, true ) ) {
+                    // Track this format for conversion tracking cleanup
+                    if ( ! in_array( $format, $disabled_formats_to_clean, true ) ) {
+                        $disabled_formats_to_clean[] = $format;
+                    }
+                    
+                    // Delete the file if it exists
+                    if ( is_string( $file_path ) && ! empty( $file_path ) && $wp_filesystem->exists( $file_path ) ) {
+                        if ( $wp_filesystem->delete( $file_path ) ) {
+                            $this->logger->info( "Removed disabled format file: {$file_path} (format: {$format}, size: {$size_name})" );
+                        } else {
+                            $this->logger->warning( "Failed to remove disabled format file: {$file_path} (format: {$format}, size: {$size_name})" );
+                        }
+                    }
+                    
+                    // Remove from metadata structure
+                    unset( $all_converted_files_by_size[ $size_name ][ $format ] );
+                    $disabled_formats_removed = true;
+                }
+            }
+            
+            // Clean up empty size arrays
+            if ( empty( $all_converted_files_by_size[ $size_name ] ) ) {
+                unset( $all_converted_files_by_size[ $size_name ] );
+            }
+        }
+        
+        // Clean up conversion tracking records for disabled formats
+        if ( ! empty( $disabled_formats_to_clean ) ) {
+            $deleted_count = $this->conversion_tracker->delete_attachment_conversions_by_formats( $attachment_id, $disabled_formats_to_clean );
+            if ( $deleted_count > 0 ) {
+                $this->logger->info( "Removed {$deleted_count} conversion tracking record(s) for disabled formats: " . implode( ', ', $disabled_formats_to_clean ) );
+            }
+        }
+        
+        // Track formats - will be built from actual converted files after processing
+        // This ensures we only track formats that actually exist
 
         // Convert each image size (full, thumbnail, medium, large, and any custom sizes)
         foreach ( $image_sizes as $size_name => $size_data ) {
@@ -363,25 +420,43 @@ class WordPressProvider {
                 
                 // Store converted file
                 $all_converted_files_by_size[ $size_name ][ $format ] = $converted_file_path;
-                
-                // Track unique formats
-                if ( ! in_array( $format, $all_converted_formats, true ) ) {
-                    $all_converted_formats[] = $format;
+            }
+        }
+        
+        // Build final formats list - only include formats that actually exist in converted files
+        $final_formats = [];
+        foreach ( $all_converted_files_by_size as $size_formats ) {
+            if ( ! is_array( $size_formats ) ) {
+                continue;
+            }
+            foreach ( array_keys( $size_formats ) as $format ) {
+                // Only include formats that are enabled AND exist in converted files
+                if ( in_array( $format, $image_formats, true ) && ! in_array( $format, $final_formats, true ) ) {
+                    $final_formats[] = $format;
                 }
             }
         }
 
         // Update WordPress meta with all converted files (organized by size)
-        if ( ! empty( $all_converted_files_by_size ) ) {
+        // Update even if we only removed disabled formats (not just when new conversions happened)
+        if ( ! empty( $all_converted_files_by_size ) || $disabled_formats_removed ) {
             AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $all_converted_files_by_size );
             
             // Also store full size in legacy format for backward compatibility
             if ( isset( $all_converted_files_by_size['full'] ) ) {
                 AttachmentMetaHandler::set_converted_files( $attachment_id, $all_converted_files_by_size['full'] );
+            } else {
+                // If no full size exists, clear legacy format
+                AttachmentMetaHandler::set_converted_files( $attachment_id, [] );
             }
             
-            AttachmentMetaHandler::set_converted_formats( $attachment_id, $all_converted_formats );
-            AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
+            // Update formats list - only include formats that actually exist
+            AttachmentMetaHandler::set_converted_formats( $attachment_id, $final_formats );
+            
+            // Only update conversion date if we actually converted something (not just cleaned up)
+            if ( ! $disabled_formats_removed || ! empty( $all_converted_files_by_size ) ) {
+                AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
+            }
         } else {
             $this->logger->error( "Image conversion failed for attachment {$attachment_id}: No sizes were successfully converted" );
         }
@@ -1086,6 +1161,11 @@ class WordPressProvider {
      * @return string Modified URL.
      */
     public function handle_attachment_url_filter( $url, $attachment_id ) {
+        // Always ensure we have a valid URL to return (never return null or empty)
+        if ( empty( $url ) || ! $attachment_id ) {
+            return $url;
+        }
+
         // Get converted files (check size-specific structure first, fallback to legacy)
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
         $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
@@ -1097,13 +1177,15 @@ class WordPressProvider {
         }
 
         // Determine media type and use appropriate renderer
+        $modified_url = $url;
         if ( $this->has_video_formats( $converted_files ) ) {
-            return $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+            $modified_url = $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         } elseif ( $this->has_image_formats( $converted_files ) ) {
-            return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+            $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         }
 
-        return $url;
+        // Always return original URL as fallback if modified URL is empty/null
+        return ! empty( $modified_url ) ? $modified_url : $url;
     }
 
     /**
@@ -1119,6 +1201,7 @@ class WordPressProvider {
      * @return string|false Modified URL or false.
      */
     public function handle_attachment_image_url_filter( $url, $attachment_id, $size ) {
+        // Always ensure we have a valid URL to return (never return null, false, or empty)
         if ( ! $url || ! $attachment_id ) {
             return $url;
         }
@@ -1140,20 +1223,22 @@ class WordPressProvider {
         }
 
         // Determine media type and use appropriate renderer
+        $modified_url = $url;
         if ( $this->has_video_formats( $converted_files ) ) {
-            return $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+            $modified_url = $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         } elseif ( $this->has_image_formats( $converted_files ) ) {
-            return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+            $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         }
 
-        return $url;
+        // Always return original URL as fallback if modified URL is empty/null
+        return ! empty( $modified_url ) ? $modified_url : $url;
     }
 
     /**
      * Handle attachment image src filter.
      *
      * Filters wp_get_attachment_image_src() which returns an array with URL, width, height.
-     * This is commonly used by blocks/plugins (like Otter Blocks) to get image URLs for CSS backgrounds.
+     * This is commonly used by blocks/plugins to get image URLs for CSS backgrounds.
      *
      * @since 1.0.2
      * @param array|false  $image         Array of image data (url, width, height) or false if no image.
@@ -1197,8 +1282,9 @@ class WordPressProvider {
             $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         }
 
-        // Update the URL in the image array if it was modified
-        if ( $modified_url !== $url ) {
+        // Update the URL in the image array if it was modified and is valid
+        // Always ensure we have a valid URL (never empty or null)
+        if ( ! empty( $modified_url ) && $modified_url !== $url ) {
             $image[0] = $modified_url;
         }
 
@@ -1793,5 +1879,110 @@ class WordPressProvider {
         }
 
         return $file;
+    }
+
+    /**
+     * Handle REST API attachment preparation.
+     *
+     * Modifies REST API responses to include converted URLs in source_url and media_details.
+     * This ensures the block editor receives converted URLs when requesting attachment data.
+     *
+     * @since 1.0.2
+     * @param \WP_REST_Response $response The response object.
+     * @param \WP_Post          $post     The attachment post object.
+     * @param \WP_REST_Request  $request  The request object.
+     * @return \WP_REST_Response Modified response object.
+     */
+    public function handle_rest_prepare_attachment( $response, $post, $request ) {
+        if ( ! $response || ! $post || ! isset( $response->data ) ) {
+            return $response;
+        }
+
+        $attachment_id = $post->ID;
+
+        // Get converted files (check size-specific structure first, fallback to legacy)
+        $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
+        $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
+            ? $converted_files_by_size['full'] 
+            : $this->get_converted_files( $attachment_id );
+        
+        if ( empty( $converted_files ) ) {
+            return $response;
+        }
+
+        // Modify source_url in REST API response
+        // Prefer WebP over AVIF for source_url to ensure compatibility with plugins that validate URLs
+        // AVIF can still be used in srcset and other contexts where it's more appropriate
+        if ( isset( $response->data['source_url'] ) && ! empty( $response->data['source_url'] ) ) {
+            $original_url = $response->data['source_url'];
+            $modified_url = $original_url;
+            
+            if ( $this->has_video_formats( $converted_files ) ) {
+                $modified_url = $this->video_renderer->modify_attachment_url( $original_url, $attachment_id, $converted_files );
+            } elseif ( $this->has_image_formats( $converted_files ) ) {
+                // Prefer WebP for source_url to ensure compatibility with plugins that validate URLs
+                // AVIF can still be used in srcset and other contexts
+                if ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+                    $webp_url = $this->image_renderer->get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP, 'full' );
+                    if ( ! empty( $webp_url ) ) {
+                        $modified_url = $webp_url;
+                    }
+                } elseif ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+                    $avif_url = $this->image_renderer->get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF, 'full' );
+                    if ( ! empty( $avif_url ) ) {
+                        $modified_url = $avif_url;
+                    }
+                }
+            }
+            
+            // Only update if we got a valid modified URL
+            if ( ! empty( $modified_url ) && $modified_url !== $original_url ) {
+                $response->data['source_url'] = $modified_url;
+            }
+        }
+
+        // Modify media_details sizes URLs if present
+        if ( isset( $response->data['media_details']['sizes'] ) && is_array( $response->data['media_details']['sizes'] ) ) {
+            foreach ( $response->data['media_details']['sizes'] as $size_name => &$size_data ) {
+                if ( isset( $size_data['source_url'] ) && ! empty( $size_data['source_url'] ) ) {
+                    $original_url = $size_data['source_url'];
+                    
+                    // Get converted files for this specific size
+                    $size_converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size[ $size_name ] ) 
+                        ? $converted_files_by_size[ $size_name ] 
+                        : $converted_files;
+                    
+                    if ( ! empty( $size_converted_files ) ) {
+                        $modified_url = $original_url;
+                        
+                        if ( $this->has_video_formats( $size_converted_files ) ) {
+                            $modified_url = $this->video_renderer->modify_attachment_url( $original_url, $attachment_id, $size_converted_files );
+                        } elseif ( $this->has_image_formats( $size_converted_files ) ) {
+                            // Prefer WebP for source_url to ensure compatibility with plugins that validate URLs
+                            // AVIF can still be used in srcset and other contexts
+                            if ( isset( $size_converted_files[ Converter::FORMAT_WEBP ] ) ) {
+                                $webp_url = $this->image_renderer->get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP, $size_name );
+                                if ( ! empty( $webp_url ) ) {
+                                    $modified_url = $webp_url;
+                                }
+                            } elseif ( isset( $size_converted_files[ Converter::FORMAT_AVIF ] ) ) {
+                                $avif_url = $this->image_renderer->get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF, $size_name );
+                                if ( ! empty( $avif_url ) ) {
+                                    $modified_url = $avif_url;
+                                }
+                            }
+                        }
+                        
+                        // Only update if we got a valid modified URL
+                        if ( ! empty( $modified_url ) && $modified_url !== $original_url ) {
+                            $size_data['source_url'] = $modified_url;
+                        }
+                    }
+                }
+            }
+            unset( $size_data ); // Break reference
+        }
+
+        return $response;
     }
 }

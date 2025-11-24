@@ -145,16 +145,8 @@ else
     fi
     
     echo "   ✅ Version updated to: $NEW_VERSION"
-fi
-
-# Output git tag command if version was bumped
-if [ "$VERSION_BUMPED" = true ]; then
+    # Store tag info for output at end of build
     TAG_NAME="v${NEW_VERSION}"
-    echo ""
-    echo "🏷️  Git Tag Command (run after committing version changes):"
-    echo "   git tag -a $TAG_NAME -m \"Release version $NEW_VERSION\""
-    echo "   git push origin $TAG_NAME"
-    echo ""
 fi
 
 # Set version for build
@@ -253,3 +245,11 @@ echo "📦 File: $ZIP_FILE"
 echo "📏 Size: $(du -h "$ZIP_FILE" | cut -f1)"
 echo "🏷️  Version: $VERSION"
 echo ""
+
+# Output git tag command if version was bumped (at end so it doesn't get lost)
+if [ "$VERSION_BUMPED" = true ]; then
+    echo "🏷️  Git Tag Command (run after committing version changes):"
+    echo "   git tag -a $TAG_NAME -m \"Release version $NEW_VERSION\""
+    echo "   git push origin $TAG_NAME"
+    echo ""
+fi

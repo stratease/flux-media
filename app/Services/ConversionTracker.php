@@ -202,6 +202,37 @@ class ConversionTracker {
 	}
 
 	/**
+	 * Delete conversion records for specific formats for an attachment.
+	 *
+	 * Removes tracking records for formats that are no longer enabled.
+	 *
+	 * @since 1.0.2
+	 * @param int   $attachment_id WordPress attachment ID.
+	 * @param array $formats Array of format names to delete (e.g., ['avif', 'webp']).
+	 * @return int Number of records deleted.
+	 */
+	public function delete_attachment_conversions_by_formats( $attachment_id, $formats ) {
+		global $wpdb;
+
+		if ( ! $attachment_id || empty( $formats ) || ! is_array( $formats ) ) {
+			return 0;
+		}
+
+		// Build placeholders for IN clause
+		$placeholders = implode( ',', array_fill( 0, count( $formats ), '%s' ) );
+		
+		// Prepare the query with format placeholders
+		$query = $wpdb->prepare(
+			"DELETE FROM {$this->table_name} WHERE attachment_id = %d AND file_type IN ($placeholders)",
+			array_merge( [ $attachment_id ], $formats )
+		);
+
+		$deleted = $wpdb->query( $query );
+
+		return $deleted !== false ? (int) $deleted : 0;
+	}
+
+	/**
 	 * Get conversion statistics.
 	 *
 	 * Includes all sizes in the count (full, thumbnail, medium, etc.).
