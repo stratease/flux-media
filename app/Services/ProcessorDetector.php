@@ -43,6 +43,7 @@ class ProcessorDetector {
                 'version' => $this->get_imagick_version(),
                 'webp_support' => $this->imagick_supports_webp(),
                 'avif_support' => $this->imagick_supports_avif(),
+                'animated_gif_support' => $this->imagick_supports_animated_gif(),
             ];
         }
 
@@ -54,6 +55,7 @@ class ProcessorDetector {
                 'version' => $this->get_gd_version(),
                 'webp_support' => $this->gd_supports_webp(),
                 'avif_support' => $this->gd_supports_avif(),
+                'animated_gif_support' => false, // GD cannot preserve animation.
             ];
         }
 
@@ -303,6 +305,26 @@ class ProcessorDetector {
      */
     private function gd_supports_avif() {
         return $this->is_gd_available() && function_exists( 'imageavif' );
+    }
+
+    /**
+     * Check if Imagick supports animated GIF.
+     *
+     * @since TBD
+     * @return bool True if Imagick supports GIF format, false otherwise.
+     */
+    private function imagick_supports_animated_gif() {
+        if ( ! $this->is_imagick_available() ) {
+            return false;
+        }
+
+        try {
+            $imagick = new \Imagick();
+            $formats = $imagick->queryFormats();
+            return in_array( 'GIF', $formats, true );
+        } catch ( \Exception $e ) {
+            return false;
+        }
     }
 
     /**

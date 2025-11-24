@@ -49,6 +49,14 @@ class ImageConverter implements Converter {
     private $processor_detector;
 
     /**
+     * GIF animation detector instance.
+     *
+     * @since TBD
+     * @var GifAnimationDetector
+     */
+    private $gif_detector;
+
+    /**
      * Available image processors.
      *
      * @since 0.1.0
@@ -112,6 +120,7 @@ class ImageConverter implements Converter {
         $this->logger = $logger;
         $this->processor_detector = new ProcessorDetector();
         $this->format_detector = new FormatSupportDetector( $this->processor_detector );
+        $this->gif_detector = new GifAnimationDetector( $logger );
         $this->available_processors = $this->initialize_processors();
     }
 
@@ -177,6 +186,7 @@ class ImageConverter implements Converter {
 				'version' => $processor_info['version'],
 				'webp_support' => $processor_info['webp_support'] ?? false,
 				'avif_support' => $processor_info['avif_support'] ?? false,
+				'animated_gif_support' => $processor_info['animated_gif_support'] ?? false,
 			];
 		}
 		
@@ -220,9 +230,33 @@ class ImageConverter implements Converter {
 	 *
 	 * @since 0.1.0
 	 * @param string $format Target format constant.
+	 * @param string $source_path Optional source file path for animated GIF detection.
 	 * @return ImageProcessorInterface|null Best processor or null if none available.
 	 */
-	private function processor_for_format( $format ) {
+	private function processor_for_format( $format, $source_path = null ) {
+		// Check if source is an animated GIF - if so, force Imagick usage.
+		if ( $source_path && $this->gif_detector->is_animated( $source_path ) ) {
+			if ( isset( $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
+				$imagick = $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ];
+				$processor_info = $imagick->get_info();
+				
+				// Check if Imagick supports the target format and animated GIFs.
+				if ( ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) ||
+					 ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) ) {
+					if ( $processor_info['animated_gif_support'] ?? false ) {
+						$this->logger->debug( "Using Imagick for animated GIF conversion to {$format}" );
+						return $imagick;
+					}
+				}
+				
+				// If animated GIF but Imagick doesn't support it, log warning.
+				$this->logger->warning( "Animated GIF detected but Imagick does not support animated GIF conversion. Conversion may fail or lose animation." );
+			} else {
+				$this->logger->error( "Animated GIF detected but Imagick is not available. GD cannot preserve animation." );
+				return null;
+			}
+		}
+		
 		// Prefer Imagick for better quality and more features
 		if ( isset( $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
 			$imagick = $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ];
@@ -262,7 +296,7 @@ class ImageConverter implements Converter {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_webp( $source_path, $destination_path, $options = [] ) {
-		$processor = $this->processor_for_format( Converter::FORMAT_WEBP );
+		$processor = $this->processor_for_format( Converter::FORMAT_WEBP, $source_path );
 		if ( ! $processor ) {
 			$this->logger->error( 'No image processor available for WebP conversion' );
 			return false;
@@ -292,7 +326,7 @@ class ImageConverter implements Converter {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_avif( $source_path, $destination_path, $options = [] ) {
-		$processor = $this->processor_for_format( Converter::FORMAT_AVIF );
+		$processor = $this->processor_for_format( Converter::FORMAT_AVIF, $source_path );
 		if ( ! $processor ) {
 			$this->logger->error( 'No image processor available for AVIF conversion' );
 			return false;

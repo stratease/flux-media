@@ -12,6 +12,7 @@ One-click AVIF/WebP image optimization and video compression for WordPress. Auto
 - **Quality Control**: Configurable quality settings with version-specific AVIF optimization
 - **Automatic Processing**: Convert on upload and bulk process existing media
 - **WordPress Integration**: Seamless integration with Gutenberg blocks and responsive images
+- **GIF Support**: Full support for static and animated GIFs with animation preservation (requires Imagick)
 
 ### Video Optimization
 - **FFmpeg-Powered**: Uses PHP-FFmpeg for efficient MP4/WebM generation

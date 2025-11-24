@@ -44,4 +44,21 @@ interface ImageProcessorInterface {
      * @return array Processor information.
      */
     public function get_info();
+
+    /**
+     * Check if processor supports animated GIF conversion.
+     *
+     * @since TBD
+     * @return bool True if processor can handle animated GIFs, false otherwise.
+     */
+    public function supports_animated_gif();
+
+    /**
+     * Check if a GIF file is animated.
+     *
+     * @since TBD
+     * @param string $file_path Path to the GIF file.
+     * @return bool True if animated, false otherwise.
+     */
+    public function is_animated_gif( $file_path );
 }

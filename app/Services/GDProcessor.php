@@ -54,6 +54,7 @@ class GDProcessor implements ImageProcessorInterface {
 			'jpeg_support' => $gd_info['JPEG Support'] ?? false,
 			'png_support' => $gd_info['PNG Support'] ?? false,
 			'gif_support' => $gd_info['GIF Read Support'] ?? false,
+			'animated_gif_support' => false, // GD cannot preserve animation.
 		];
 	}
 
@@ -70,6 +71,11 @@ class GDProcessor implements ImageProcessorInterface {
 		if ( ! $this->supports_webp() ) {
 			$this->logger->error( 'GD does not support WebP format' );
 			return false;
+		}
+
+		// Check if this is an animated GIF and warn.
+		if ( $this->is_animated_gif( $source_path ) ) {
+			$this->logger->warning( "Animated GIF detected: {$source_path}. GD cannot preserve animation. Consider using Imagick for animated GIFs." );
 		}
 
 		$image = $this->load_image( $source_path );
@@ -104,6 +110,11 @@ class GDProcessor implements ImageProcessorInterface {
 		if ( ! $this->supports_avif() ) {
 			$this->logger->error( 'GD does not support AVIF format' );
 			return false;
+		}
+
+		// Check if this is an animated GIF and warn.
+		if ( $this->is_animated_gif( $source_path ) ) {
+			$this->logger->warning( "Animated GIF detected: {$source_path}. GD cannot preserve animation. Consider using Imagick for animated GIFs." );
 		}
 
 		$image = $this->load_image( $source_path );
@@ -143,6 +154,29 @@ class GDProcessor implements ImageProcessorInterface {
 	 */
 	public function supports_avif() {
 		return function_exists( 'imageavif' );
+	}
+
+	/**
+	 * Check if processor supports animated GIF conversion.
+	 *
+	 * @since TBD
+	 * @return bool Always false - GD cannot preserve animation.
+	 */
+	public function supports_animated_gif() {
+		return false; // GD cannot preserve animation.
+	}
+
+	/**
+	 * Check if a GIF file is animated.
+	 *
+	 * @since TBD
+	 * @param string $file_path Path to the GIF file.
+	 * @return bool True if animated, false otherwise.
+	 */
+	public function is_animated_gif( $file_path ) {
+		// Use GifAnimationDetector for detection.
+		$detector = new GifAnimationDetector( $this->logger );
+		return $detector->is_animated( $file_path );
 	}
 
 	/**

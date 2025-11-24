@@ -1,10 +1,10 @@
 === Flux Media Optimizer by Flux Plugins ===
-Contributors: fluxplugins
+Contributors: edaniels
 Tags: image optimization, video compression, webp, avif, flux plugins
 Requires at least: 6.2
 Tested up to: 6.8
 Requires PHP: 8.0
-Stable tag: 1.1.2
+Stable tag: 2.0.0
 License: GPL-2.0+
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -24,6 +24,7 @@ Transform your WordPress site's media performance. Flux Media Optimizer by Flux 
 **✨ Smart Features:**
 * **Hybrid approach** - Creates both WebP and AVIF formats for maximum browser compatibility
 * **Video optimization** - Built-in MP4/WebM conversion powered by FFmpeg with configurable quality and bitrate settings
+* **GIF support** - Full support for static and animated GIFs with animation preservation (requires Imagick for animated GIFs)
 * **Automatic conversion** - Optimizes images and videos on upload and processes existing media
 * **WordPress integration** - Works with Gutenberg blocks, galleries, responsive images, and video embeds
 * **Quality control** - Adjustable compression settings for images (60-100% quality) and videos (bitrate and presets)
@@ -94,7 +95,7 @@ Yes, Flux Media Optimizer works with any WordPress theme. It integrates seamless
 
 = What image and video formats are supported? =
 
-The plugin supports converting JPEG and PNG images to WebP and AVIF formats. For videos, it converts to optimized MP4 and WebM formats. It automatically detects which formats your server supports and uses the best available option.
+The plugin supports converting JPEG, PNG, and GIF images to WebP and AVIF formats. For videos, it converts to optimized MP4 and WebM formats. It automatically detects which formats your server supports and uses the best available option. Note: Animated GIF support requires the Imagick extension - GD cannot preserve animation.
 
 = How much space will I save? =
 
@@ -127,6 +128,10 @@ No, Flux Media Optimizer creates new optimized versions while keeping your origi
 = What if my server doesn't support WebP or AVIF? =
 
 Flux Media Optimizer automatically detects your server's capabilities and only creates formats that are supported. If your server doesn't support modern formats, the plugin will gracefully fall back to your original images.
+
+= Can I convert animated GIFs? =
+
+Yes! Flux Media Optimizer supports both static and animated GIFs. However, animated GIF conversion requires the Imagick PHP extension. GD cannot preserve animation, so if you only have GD available, animated GIFs will be converted but will lose their animation. The plugin will automatically use Imagick when available for animated GIFs.
 
 == Screenshots ==
 

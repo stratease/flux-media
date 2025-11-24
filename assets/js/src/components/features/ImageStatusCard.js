@@ -8,6 +8,7 @@ import {
   AlertTitle,
   Divider,
   Skeleton,
+  Tooltip,
 } from '@mui/material';
 import {
   CheckCircle,
@@ -161,6 +162,28 @@ const ImageStatusCard = ({ status, loading, error }) => {
                           color={processor.avif_support ? 'success' : 'error'}
                           size="small"
                         />
+                      </Grid>
+                      <Grid item>
+                        <Tooltip
+                          title={
+                            processor.animated_gif_support
+                              ? __(
+                                  'Imagick can preserve animation when converting animated GIFs to WebP/AVIF.',
+                                  'flux-media-optimizer'
+                                )
+                              : __(
+                                  'GD cannot preserve animation. Animated GIFs will lose animation when converted. Imagick is required for animated GIF support.',
+                                  'flux-media-optimizer'
+                                )
+                          }
+                          arrow
+                        >
+                          <Chip
+                            label="Animated GIF"
+                            color={processor.animated_gif_support ? 'success' : 'error'}
+                            size="small"
+                          />
+                        </Tooltip>
                       </Grid>
                     </Grid>
                   </Box>

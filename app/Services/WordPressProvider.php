@@ -19,6 +19,7 @@ use FluxMedia\App\Services\Logger;
 use FluxMedia\App\Services\Settings;
 use FluxMedia\App\Services\Converter;
 use FluxMedia\App\Services\AttachmentMetaHandler;
+use FluxMedia\App\Services\GifAnimationDetector;
 
 /**
  * WordPress provider that handles all WordPress integration.
@@ -241,6 +242,7 @@ class WordPressProvider {
         return $metadata;
     }
 
+
     /**
      * Handle attachment deletion.
      *
@@ -250,6 +252,30 @@ class WordPressProvider {
      */
     public function handle_attachment_deletion( $attachment_id ) {
         $this->cleanup_converted_files( $attachment_id );
+    }
+
+    /**
+     * Check if an attachment is an animated GIF.
+     *
+     * @since TBD
+     * @param int $attachment_id Attachment ID.
+     * @return bool True if animated GIF, false otherwise.
+     */
+    private function is_animated_gif_attachment( $attachment_id ) {
+        $file_path = get_attached_file( $attachment_id );
+        if ( ! $file_path || ! file_exists( $file_path ) ) {
+            return false;
+        }
+
+        // Check MIME type first.
+        $mime_type = get_post_mime_type( $attachment_id );
+        if ( $mime_type !== 'image/gif' ) {
+            return false;
+        }
+
+        // Use GifAnimationDetector to check if animated.
+        $gif_detector = new GifAnimationDetector( $this->logger );
+        return $gif_detector->is_animated( $file_path );
     }
 
     /**
@@ -265,18 +291,28 @@ class WordPressProvider {
      * @return void
      */
     private function process_image_conversion( $attachment_id, $file_path ) {
-        // Ensure metadata exists and all sizes are generated
+        // Check if this is an animated GIF.
+        $is_animated_gif = $this->is_animated_gif_attachment( $attachment_id );
+
+        // Ensure metadata exists and all sizes are generated.
         $metadata = wp_get_attachment_metadata( $attachment_id );
         if ( empty( $metadata ) || empty( $metadata['file'] ) ) {
-            // Generate metadata if it doesn't exist (this will create all sizes)
+            // Generate metadata if it doesn't exist (this will create all sizes).
             $metadata = wp_generate_attachment_metadata( $attachment_id, $file_path );
             if ( ! empty( $metadata ) ) {
                 wp_update_attachment_metadata( $attachment_id, $metadata );
             }
         }
 
-        // Get all image sizes for this attachment (includes full + all registered sizes)
+        // Get all image sizes for this attachment (includes full + all registered sizes).
         $image_sizes = $this->get_all_image_paths_by_size( $attachment_id );
+        
+        // For animated GIFs, get the full-size source file path to use for all conversions.
+        $full_size_source_path = null;
+        if ( $is_animated_gif && isset( $image_sizes['full'] ) ) {
+            $full_size_source_path = $image_sizes['full']['file_path'];
+            $this->logger->info( "Using full-size animated GIF as source for all size conversions: {$full_size_source_path}" );
+        }
         
         if ( empty( $image_sizes ) ) {
             $this->logger->warning( "No image sizes found for attachment {$attachment_id}" );
@@ -383,14 +419,23 @@ class WordPressProvider {
         // Convert each image size (full, thumbnail, medium, large, and any custom sizes)
         foreach ( $image_sizes as $size_name => $size_data ) {
             $size_file_path = $size_data['file_path'];
+            $size_width = $size_data['width'] ?? null;
+            $size_height = $size_data['height'] ?? null;
             
-            // Skip if size file doesn't exist
-            if ( ! $wp_filesystem->exists( $size_file_path ) ) {
-                $this->logger->warning( "Size file not found for attachment {$attachment_id}, size {$size_name}: {$size_file_path}" );
+            // For animated GIFs, use the full-size source file instead of the static thumbnail.
+            $source_file_path = $size_file_path;
+            if ( $is_animated_gif && $size_name !== 'full' && $full_size_source_path ) {
+                $source_file_path = $full_size_source_path;
+                $this->logger->info( "Using full-size animated GIF source for size '{$size_name}' conversion to preserve animation" );
+            }
+            
+            // Skip if source file doesn't exist
+            if ( ! $wp_filesystem->exists( $source_file_path ) ) {
+                $this->logger->warning( "Source file not found for attachment {$attachment_id}, size {$size_name}: {$source_file_path}" );
                 continue;
             }
             
-            // Get file path components
+            // Get file path components for destination (use the size file path structure)
             $size_file_path_normalized = wp_normalize_path( $size_file_path );
             $size_file_dir = dirname( $size_file_path_normalized );
             $size_file_info = pathinfo( $size_file_path_normalized );
@@ -402,16 +447,24 @@ class WordPressProvider {
                 $destination_paths[ $format ] = trailingslashit( $size_file_dir ) . $size_file_name . '.' . $format;
             }
             
+            // Add resize dimensions to settings for animated GIFs if this is not the full size.
+            $conversion_settings = $settings;
+            if ( $is_animated_gif && $size_name !== 'full' && $size_width && $size_height ) {
+                $conversion_settings['resize_width'] = $size_width;
+                $conversion_settings['resize_height'] = $size_height;
+                $this->logger->debug( "Adding resize dimensions for animated GIF: {$size_width}x{$size_height}" );
+            }
+            
             // Process this size
-            $results = $this->image_converter->process_image( $size_file_path, $destination_paths, $settings );
+            $results = $this->image_converter->process_image( $source_file_path, $destination_paths, $conversion_settings );
             
             if ( ! $results['success'] ) {
                 $this->logger->warning( "Image conversion failed for attachment {$attachment_id}, size {$size_name}: " . implode( ', ', $results['errors'] ?? [] ) );
                 continue;
             }
 
-            // Get file sizes for quota tracking
-            $size_original_size = $wp_filesystem->size( $size_file_path );
+            // Get file sizes for quota tracking - use source file size for animated GIFs.
+            $size_original_size = $wp_filesystem->size( $source_file_path );
             
             // Initialize size array if needed
             if ( ! isset( $all_converted_files_by_size[ $size_name ] ) ) {

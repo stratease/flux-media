@@ -152,6 +152,7 @@ class StatusController extends BaseController {
 				'version' => $processor_info['version'],
 				'webp_support' => $processor_info['webp_support'] ?? false,
 				'avif_support' => $processor_info['avif_support'] ?? false,
+				'animated_gif_support' => $processor_info['animated_gif_support'] ?? false,
 			];
 		}
 		

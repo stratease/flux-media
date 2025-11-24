@@ -3,7 +3,7 @@
  * Plugin Name: Flux Media Optimizer by Flux Plugins
  * Plugin URI: https://fluxplugins.com/media-optimizer
  * Description: One-click image (AVIF & WebP) and video optimization for WordPress.
- * Version: 1.1.2
+ * Version: 2.0.0
  * Author: Flux Plugins
  * Author URI: https://fluxplugins.com
  * License: GPL-2.0+
@@ -26,7 +26,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants.
-define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '1.1.2' );
+define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '2.0.0' );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE', __FILE__ );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
