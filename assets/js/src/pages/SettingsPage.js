@@ -427,6 +427,30 @@ const SettingsPage = () => {
           </Box>
         </Grid>
 
+        {/* License Settings */}
+        <Grid item xs={12}>
+          <Divider sx={{ my: 2 }} />
+          <Box>
+            <Typography variant="h5" gutterBottom>
+              {__('License Settings', 'flux-media-optimizer')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {__('Enter your Flux Media Optimizer license key to unlock premium features and remove usage limits.', 'flux-media-optimizer')}
+            </Typography>
+            <TextField
+              fullWidth
+              label={__('License Key', 'flux-media-optimizer')}
+              placeholder={__('Enter your license key', 'flux-media-optimizer')}
+              value={settings?.license_key}
+              disabled={isLoading}
+              onChange={handleSettingChange('license_key')}
+              variant="outlined"
+              size="small"
+              sx={{ maxWidth: 400 }}
+              helperText={__('Your license key will be securely stored and used to validate premium features.', 'flux-media-optimizer')}
+            />
+          </Box>
+        </Grid>
 
         {/* Newsletter Subscription */}
         <Grid item xs={12}>

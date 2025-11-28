@@ -222,9 +222,6 @@ zip -r "$ZIP_FILE" "$PLUGIN_NAME/" \
     -x "$PLUGIN_NAME/.htaccess" \
     -x "$PLUGIN_NAME/.git*" \
     -x "$PLUGIN_NAME/.phpunit*" \
-    -x "$PLUGIN_NAME/assets/js/src/*" \
-    -x "$PLUGIN_NAME/assets/js/dist/*.html" \
-    -x "$PLUGIN_NAME/assets/js/dist/*.LICENSE.txt" \
     -x "$PLUGIN_NAME/*.zip" \
     -x "$PLUGIN_NAME/*.log" \
     -x "$PLUGIN_NAME/*.xml" \

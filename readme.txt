@@ -4,7 +4,7 @@ Tags: image optimization, video compression, webp, avif, flux plugins
 Requires at least: 6.2
 Tested up to: 6.8
 Requires PHP: 8.0
-Stable tag: 2.0.0
+Stable tag: 2.0.1
 License: GPL-2.0+
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -37,6 +37,11 @@ Transform your WordPress site's media performance. Flux Media Optimizer by Flux 
 * Agencies managing multiple client sites
 * Anyone serious about website performance and SEO
 
+**💡 Pro Features (Coming Soon):**
+* **Unlimited cloud processing** - Offload heavy conversions to our secure cloud infrastructure
+* **Best optimizations** - Servers built with optimal image and video processing libraries to get the best results
+* **CDN integration** - Global content delivery for lightning-fast image serving
+* **Priority support** - Get help when you need it most
 
 **🔒 Privacy & Security:**
 * All processing happens locally on your server by default
@@ -90,7 +95,7 @@ To build the plugin from source:
 2. Build production assets: `npm run build`
 3. For development with hot reload: `npm run start`
 
-The source code is available in the GitHub repository: https://github.com/stratease/flux-media-optimizer
+The source code is available in the GitHub repository: https://github.com/stratease/flux-media
 
 **🎨 Works with any theme** - Flux Media Optimizer integrates seamlessly with WordPress's image system, so it works with any theme without modifications.
 

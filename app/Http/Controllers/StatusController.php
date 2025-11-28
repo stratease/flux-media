@@ -97,6 +97,15 @@ class StatusController extends BaseController {
 	}
 
 	/**
+	 * Get image processor status.
+	 *
+	 * @since 0.1.0
+	 * @return array Image processor status.
+	 */
+	private function get_image_processor_status() {
+		$available_processors = $this->processor_detector->get_available_image_processors();
+		$format_support_info = $this->format_detector->get_format_support_info();
+
 		// Build detailed processor information
 		$processors = [];
 		foreach ( $available_processors as $type => $processor_info ) {

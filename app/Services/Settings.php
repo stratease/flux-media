@@ -100,6 +100,7 @@ class Settings {
 			'enable_logging' => self::DEFAULT_ENABLE_LOGGING,
 			
 			// SaaS API settings.
+			'license_key' => '',
 		];
 	}
 

@@ -107,8 +107,8 @@ The plugin implements a sophisticated hybrid approach for optimal image performa
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/your-username/flux-media-optimizer.git
-   cd flux-media-optimizer
+   git clone https://github.com/{your-username}/flux-media.git
+   cd flux-media
    ```
 
 3. **Install dependencies**:
@@ -468,7 +468,7 @@ Any other context or screenshots about the feature request.
 ### Contact
 - **Email**: support@fluxplugins.com
 - **Website**: https://fluxplugins.com
-- **GitHub**: https://github.com/stratease/flux-media-optimizer
+- **GitHub**: https://github.com/stratease/flux-media
 
 ## 📄 License
 
