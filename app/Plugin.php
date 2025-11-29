@@ -135,7 +135,7 @@ class Plugin {
     /**
      * Register REST API routes.
      *
-     * @since 0.1.0
+     * @since 2.0.1
      * @return void
      */
     public function register_rest_routes() {

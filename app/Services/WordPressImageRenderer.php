@@ -827,7 +827,7 @@ class WordPressImageRenderer {
     /**
      * Get conversion status HTML for admin display.
      *
-     * @since 1.0.0
+     * @since 2.0.1
      * @param int   $attachment_id Attachment ID.
      * @param array $converted_files Array of converted file paths (can be size-specific structure or legacy format).
      * @return string HTML for conversion status.
@@ -903,6 +903,11 @@ class WordPressImageRenderer {
                 $html .= '</h5>';
                 
                 foreach ( $size_formats as $format => $file_path ) {
+                    // Skip if file_path is not a string (invalid data structure)
+                    if ( ! is_string( $file_path ) || empty( $file_path ) ) {
+                        continue;
+                    }
+                    
                     $file_size = $wp_filesystem && $wp_filesystem->exists( $file_path ) ? $wp_filesystem->size( $file_path ) : ( file_exists( $file_path ) ? filesize( $file_path ) : 0 );
                     $size_original = 0;
                     
@@ -948,6 +953,11 @@ class WordPressImageRenderer {
         } else {
             // Legacy format (flat structure) - only full size
             foreach ( $converted_files as $format => $file_path ) {
+                // Skip if file_path is not a string (invalid data structure)
+                if ( ! is_string( $file_path ) || empty( $file_path ) ) {
+                    continue;
+                }
+                
                 $file_size = $wp_filesystem && $wp_filesystem->exists( $file_path ) ? $wp_filesystem->size( $file_path ) : ( file_exists( $file_path ) ? filesize( $file_path ) : 0 );
                 $savings = $original_size > 0 ? ( ( $original_size - $file_size ) / $original_size ) * 100 : 0;
                 

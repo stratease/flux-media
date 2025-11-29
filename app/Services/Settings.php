@@ -397,7 +397,7 @@ class Settings {
 	/**
 	 * Get the license key for future SaaS API authentication.
 	 *
-	 * @since 0.1.0
+	 * @since 2.0.1
 	 * @return string License key.
 	 */
 	public static function get_license_key() {
@@ -407,7 +407,7 @@ class Settings {
 	/**
 	 * Set the license key for future SaaS API authentication.
 	 *
-	 * @since 0.1.0
+	 * @since 2.0.1
 	 * @param string $license_key License key.
 	 * @return bool True on success, false on failure.
 	 */

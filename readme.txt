@@ -8,7 +8,7 @@ Stable tag: 2.0.1
 License: GPL-2.0+
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Compress images to AVIF/WebP and optimize videos for 50-70% faster loads. Boost Core Web Vitals and improve SEO with automatic image and video optimization.
+Compress images to AVIF/WebP and optimize videos for 50-70% faster loads. Boost Core Web Vitals and SEO with automatic optimization.
 
 == Description ==
 

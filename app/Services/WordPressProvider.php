@@ -53,8 +53,6 @@ class WordPressProvider {
     private $video_converter;
 
     /**
-
-    /**
      * Conversion tracker instance.
      *
      * @since 0.1.0
@@ -192,7 +190,7 @@ class WordPressProvider {
     /**
      * Handle media upload (images and videos).
      *
-     * @since 0.1.0
+     * @since 2.0.1
      * @param int $attachment_id Attachment ID.
      * @return void
      */
@@ -203,7 +201,12 @@ class WordPressProvider {
         }
 
         $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
+        if ( ! $file_path ) {
+            return;
+        }
+        
+        $filetype = wp_check_filetype( $file_path );
+        if ( empty( $filetype['ext'] ) ) {
             return;
         }
 
@@ -278,12 +281,18 @@ class WordPressProvider {
      * Ensures all registered WordPress image sizes are generated and converted.
      * Do not check our disabled flag here - sometimes we run this from explicit image conversions which should override.
      *
-     * @since 1.0.0
+     * @since 2.0.1
      * @param int    $attachment_id Attachment ID.
      * @param string $file_path Source file path.
      * @return void
      */
     private function process_image_conversion( $attachment_id, $file_path ) {
+        // Verify file exists before processing
+        if ( ! file_exists( $file_path ) ) {
+            $this->logger->warning( "Source file does not exist for attachment {$attachment_id}: {$file_path}" );
+            return;
+        }
+
         // Check if this is an animated GIF.
         $is_animated_gif = $this->is_animated_gif_attachment( $attachment_id );
 
@@ -292,9 +301,11 @@ class WordPressProvider {
         if ( empty( $metadata ) || empty( $metadata['file'] ) ) {
             // Generate metadata if it doesn't exist (this will create all sizes).
             $metadata = wp_generate_attachment_metadata( $attachment_id, $file_path );
-            if ( ! empty( $metadata ) ) {
-                wp_update_attachment_metadata( $attachment_id, $metadata );
+            if ( empty( $metadata ) ) {
+                $this->logger->error( "Failed to generate metadata for attachment {$attachment_id}" );
+                return;
             }
+            wp_update_attachment_metadata( $attachment_id, $metadata );
         }
 
         // Get all image sizes for this attachment (includes full + all registered sizes).
@@ -1762,7 +1773,7 @@ class WordPressProvider {
      *
      * Runs when image metadata is updated, including after edits like crop/rotate.
      *
-     * @since 1.0.0
+     * @since 2.0.1
      * @param array $data Attachment metadata.
      * @param int   $attachment_id Attachment ID.
      * @return array Unmodified metadata array.
@@ -1774,7 +1785,12 @@ class WordPressProvider {
         }
 
         $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
+        if ( ! $file_path ) {
+            return $data;
+        }
+        
+        $filetype = wp_check_filetype( $file_path );
+        if ( empty( $filetype['ext'] ) ) {
             return $data;
         }
 

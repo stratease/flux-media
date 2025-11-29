@@ -40,14 +40,11 @@ class StatusController extends BaseController {
 	private $processor_detector;
 
 	/**
-
-	/**
 	 * Constructor.
 	 *
-	 * @since 0.1.0
+	 * @since 2.0.1
 	 * @param FormatSupportDetector $format_detector Format support detector.
 	 * @param ProcessorDetector     $processor_detector Processor detector.
-	
 	 */
 	public function __construct( FormatSupportDetector $format_detector, ProcessorDetector $processor_detector ) {
 		$this->format_detector = $format_detector;
