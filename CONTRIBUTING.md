@@ -29,10 +29,10 @@ This plugin has been completely refactored with a modern, decoupled architecture
 - **Skeleton Loading**: Professional loading states
 
 #### 4. **SaaS API Integration Ready**
-- **License Key Authentication**: Secure API integration with license key validation
-- **Remote Quota Management**: Quota tracking handled by SaaS service
+- **License Key Storage**: License key field available for future SaaS API authentication (currently unused)
 - **Privacy Compliant**: Full compliance with WordPress.org SaaS guidelines
-- **Future-Ready**: Architecture prepared for cloud processing integration
+- **Future-Ready**: Architecture prepared for optional cloud processing integration (opt-in only)
+- **Local-First**: All functionality works locally without any external dependencies
 
 ## 📁 Project Structure
 
@@ -44,8 +44,11 @@ flux-media-optimizer/
 │   │   ├── VideoConverter.php    # Pure video conversion logic
 │   │   ├── WordPressProvider.php # WordPress integration layer
 │   │   ├── WordPressImageRenderer.php # Image rendering service
-│   │   ├── QuotaManager.php      # SaaS API quota management
+│   │   ├── WordPressVideoRenderer.php # Video rendering service
 │   │   ├── ConversionTracker.php # Conversion tracking
+│   │   ├── AttachmentMetaHandler.php # Attachment meta data handler
+│   │   ├── GifAnimationDetector.php # GIF animation detection
+│   │   ├── BulkConverter.php     # Bulk conversion processing
 │   │   └── Settings.php          # Centralized settings management
 │   ├── Http/                     # REST API controllers
 │   │   └── Controllers/          # Individual API controllers
@@ -99,6 +102,14 @@ The plugin implements a sophisticated hybrid approach for optimal image performa
 - **Single Format Mode**: Replaces `src` attributes with optimized formats
 - **Runtime Decision**: Hybrid setting determines output format, not processing
 - **Format Priority**: AVIF > WebP > Original fallback
+
+### GIF Animation Detection
+The plugin includes a sophisticated GIF animation detector:
+
+- **Imagick Method**: Uses Imagick to count frames for reliable detection
+- **File-Based Fallback**: Binary file reading for environments without Imagick
+- **WP_Filesystem**: Uses WordPress filesystem methods for file operations
+- **Animation Preservation**: Animated GIFs use full-size source for all conversions
 
 ## 🚀 Getting Started
 
@@ -177,8 +188,9 @@ The plugin implements a sophisticated hybrid approach for optimal image performa
 - **WordPress Coding Standards**: Follow WPCS guidelines strictly
 - **PSR-4 Autoloading**: Proper namespace usage with `FluxMedia\` prefix
 - **Type Hints**: Use PHP 7.4+ type declarations for all parameters and returns
-- **Documentation**: Comprehensive PHPDoc comments with `@since TBD`
+- **Documentation**: Comprehensive PHPDoc comments with `@since` tags using version numbers (e.g., `@since 2.0.1`)
 - **Use Statements**: Always use shortened qualified class names
+- **WP_Filesystem**: Use WordPress filesystem methods instead of direct PHP file operations
 - **No Underscore Prefixes**: Properties and methods use standard naming without underscores
 - **Dependency Injection**: Use container for service management
 - **Interface Segregation**: Define clear contracts for all processors and services
@@ -262,7 +274,8 @@ The plugin implements a sophisticated hybrid approach for optimal image performa
 - Uses WordPress options API for configuration
 - Integrates with WordPress media library
 - Follows WordPress database abstraction
-- Enhanced post meta for conversion tracking
+- Enhanced post meta for conversion tracking via `AttachmentMetaHandler`
+- Size-specific conversion tracking (supports full size and all registered WordPress image sizes)
 
 ## 🚀 API Architecture
 
@@ -420,6 +433,7 @@ Any other context or screenshots about the feature request.
 - **Inline comments** for complex logic
 - **README updates** for new features
 - **API documentation** for new endpoints
+- **Version Tagging**: Update `@since` tags to current version (e.g., `2.0.1`) when modifying code
 
 ### User Documentation
 - **Clear installation** instructions
