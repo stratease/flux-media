@@ -8,6 +8,8 @@
 
 namespace FluxMedia\App\Services;
 
+use FluxMedia\App\Services\LoggerInterface;
+
 /**
  * Service to detect if a GIF file is animated.
  *
@@ -92,50 +94,45 @@ class GifAnimationDetector {
 			return false;
 		}
 
-		// Read file to check for multiple image descriptors
-		$handle = $wp_filesystem->fopen( $file_path, 'rb' );
-		if ( ! $handle ) {
+		// Check file size to avoid reading extremely large files into memory
+		// Most GIFs are reasonable in size, but we'll cap at 50MB for safety
+		$file_size = $wp_filesystem->size( $file_path );
+		if ( $file_size === false || $file_size > 50 * 1024 * 1024 ) {
+			$this->logger->warning( "GIF file too large for animation detection: {$file_path} ({$file_size} bytes)" );
 			return false;
 		}
 
-		// Read first 13 bytes (GIF header)
-		$header = $wp_filesystem->fread( $handle, 13 );
-		if ( substr( $header, 0, 3 ) !== 'GIF' ) {
-			$wp_filesystem->fclose( $handle );
+		// Read file contents using WordPress filesystem API
+		$file_contents = $wp_filesystem->get_contents( $file_path );
+		if ( $file_contents === false ) {
+			$this->logger->warning( "Failed to read GIF file for animation detection: {$file_path}" );
+			return false;
+		}
+
+		// Verify GIF header
+		if ( strlen( $file_contents ) < 13 || substr( $file_contents, 0, 3 ) !== 'GIF' ) {
 			return false;
 		}
 
 		// Count image descriptors (0x21 0xF9 pattern indicates graphic control extension)
 		// Animated GIFs have multiple image descriptors
+		// Look for image separator (0x2C) which indicates a new image frame
 		$image_descriptor_count = 0;
-		$chunk_size = 8192;
-		$previous_byte = null;
+		$length = strlen( $file_contents );
 
-		while ( ! $wp_filesystem->feof( $handle ) ) {
-			$chunk = $wp_filesystem->fread( $handle, $chunk_size );
-			if ( $chunk === false ) {
-				break;
-			}
+		for ( $i = 0; $i < $length; $i++ ) {
+			$byte = ord( $file_contents[ $i ] );
 
-			$length = strlen( $chunk );
-			for ( $i = 0; $i < $length; $i++ ) {
-				$byte = ord( $chunk[ $i ] );
-
-				// Look for image separator (0x2C) which indicates a new image frame
-				if ( $byte === 0x2C ) {
-					$image_descriptor_count++;
-					// If we find more than one image descriptor, it's animated
-					if ( $image_descriptor_count > 1 ) {
-						$wp_filesystem->fclose( $handle );
-						return true;
-					}
+			// Look for image separator (0x2C) which indicates a new image frame
+			if ( $byte === 0x2C ) {
+				$image_descriptor_count++;
+				// If we find more than one image descriptor, it's animated
+				if ( $image_descriptor_count > 1 ) {
+					return true;
 				}
-
-				$previous_byte = $byte;
 			}
 		}
 
-		$wp_filesystem->fclose( $handle );
 		return false;
 	}
 
