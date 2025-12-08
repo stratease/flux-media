@@ -71,6 +71,17 @@ class AttachmentMetaHandler {
 	const META_KEY_EXTERNAL_JOB_STATE = '_flux_media_optimizer_external_job_state';
 
 	/**
+	 * Meta key for CDN URLs.
+	 *
+	 * Stores array of CDN URLs for efficient lookup.
+	 * Structure: array of URL strings, e.g., ['https://cdn.example.com/file1.webp', 'https://cdn.example.com/file2.avif'].
+	 *
+	 * @since 3.0.0
+	 * @var string
+	 */
+	const META_KEY_CDN_URLS = '_flux_media_optimizer_cdn_urls';
+
+	/**
 	 * Meta key for converted files by size.
 	 *
 	 * Stores converted files organized by size with URLs/paths and file sizes together.
@@ -730,5 +741,56 @@ class AttachmentMetaHandler {
 	 */
 	public static function delete_external_job_state( $attachment_id ) {
 		return delete_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STATE );
+	}
+
+	/**
+	 * Get CDN URLs for an attachment.
+	 *
+	 * @since 3.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return array Array of CDN URL strings, or empty array if not found.
+	 */
+	public static function get_cdn_urls( $attachment_id ) {
+		$urls = get_post_meta( $attachment_id, self::META_KEY_CDN_URLS, true );
+		return is_array( $urls ) ? $urls : [];
+	}
+
+	/**
+	 * Set CDN URLs for an attachment.
+	 *
+	 * @since 3.0.0
+	 * @param int   $attachment_id Attachment ID.
+	 * @param array $cdn_urls      Array of CDN URL strings.
+	 * @return bool|int Meta ID if the key didn't exist, true on successful update, false on failure.
+	 */
+	public static function set_cdn_urls( $attachment_id, $cdn_urls ) {
+		// Validate that all values are strings (URLs).
+		if ( ! is_array( $cdn_urls ) ) {
+			return false;
+		}
+		
+		// Filter to ensure all values are strings and sanitize URLs.
+		$sanitized_urls = [];
+		foreach ( $cdn_urls as $url ) {
+			if ( is_string( $url ) && ! empty( $url ) ) {
+				$sanitized_urls[] = esc_url_raw( $url );
+			}
+		}
+		
+		// Remove duplicates.
+		$sanitized_urls = array_unique( $sanitized_urls );
+		
+		return update_post_meta( $attachment_id, self::META_KEY_CDN_URLS, $sanitized_urls );
+	}
+
+	/**
+	 * Delete CDN URLs meta for an attachment.
+	 *
+	 * @since 3.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True on success, false on failure.
+	 */
+	public static function delete_cdn_urls( $attachment_id ) {
+		return delete_post_meta( $attachment_id, self::META_KEY_CDN_URLS );
 	}
 }

@@ -149,6 +149,26 @@ class WebhookController extends BaseController {
 			if ( ! empty( $converted_files_by_size ) ) {
 				AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $converted_files_by_size );
 
+				// Extract all CDN URLs for efficient lookup.
+				$cdn_urls_list = [];
+				foreach ( $converted_files_by_size as $size_formats ) {
+					if ( ! is_array( $size_formats ) ) {
+						continue;
+					}
+					foreach ( $size_formats as $format_data ) {
+						if ( is_array( $format_data ) && isset( $format_data['url'] ) && is_string( $format_data['url'] ) ) {
+							// Only add CDN URLs (those starting with http:// or https://).
+							if ( strpos( $format_data['url'], 'http://' ) === 0 || strpos( $format_data['url'], 'https://' ) === 0 ) {
+								$cdn_urls_list[] = $format_data['url'];
+							}
+						}
+					}
+				}
+				// Store CDN URLs in dedicated meta field for efficient lookup.
+				if ( ! empty( $cdn_urls_list ) ) {
+					AttachmentMetaHandler::set_cdn_urls( $attachment_id, $cdn_urls_list );
+				}
+
 				// Extract formats list (including "original" format).
 				$all_formats = [];
 				foreach ( $converted_files_by_size as $size_formats ) {

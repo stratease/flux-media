@@ -440,10 +440,10 @@ class WordPressImageRenderer {
         if ( Settings::is_external_service_enabled() ) {
             try {
                 $external_provider = new ExternalOptimizationProvider( new Logger() );
-                $job_status = $external_provider->get_job_status( $post->ID );
+                $status = $external_provider->get_job_status( $post->ID );
                 
-                if ( $job_status ) {
-                    $html_content .= $this->get_external_processing_status_html( $post->ID, $job_status );
+                if ( $status ) {
+                    $html_content .= $this->get_external_processing_status_html( $post->ID, $status );
                 }
             } catch ( \Exception $e ) {
                 // Silently fail if external provider can't be initialized (e.g., table doesn't exist yet)
@@ -1083,11 +1083,11 @@ class WordPressImageRenderer {
      * @param array $job_status    Job status data.
      * @return string HTML content.
      */
-    private function get_external_processing_status_html( $attachment_id, $job_status ) {
+    private function get_external_processing_status_html( $attachment_id, $status ) {
         $html = '<div class="flux-media-optimizer-external-status" style="background: #fff3cd; border: 1px solid #ffb900; border-radius: 4px; padding: 15px; margin: 10px 0;">';
         $html .= '<h4 style="margin: 0 0 10px 0; color: #333; font-size: 14px;">' . __( 'External Processing Status', 'flux-media-optimizer' ) . '</h4>';
         
-        $status = $job_status['status'] ?? 'unknown';
+        $status = $status ?? 'unknown';
         $status_colors = [
             'queued' => '#0073aa',
             'processing' => '#0073aa',
@@ -1100,24 +1100,12 @@ class WordPressImageRenderer {
         $html .= '<strong>' . __( 'Status:', 'flux-media-optimizer' ) . '</strong> ';
         $html .= '<span style="color: ' . esc_attr( $status_color ) . '; font-weight: bold;">' . esc_html( ucfirst( $status ) ) . '</span>';
         
-        if ( ! empty( $job_status['job_id'] ) ) {
-            $html .= '<br><strong>' . __( 'Job ID:', 'flux-media-optimizer' ) . '</strong> ' . esc_html( $job_status['job_id'] );
-        }
-        
         if ( $status === 'queued' || $status === 'processing' ) {
             $html .= '<br><em style="color: #856404;">' . __( 'Processing in progress. Please check back in a few minutes.', 'flux-media-optimizer' ) . '</em>';
         }
         
-        if ( $status === 'failed' && ! empty( $job_status['last_error'] ) ) {
-            $html .= '<br><strong style="color: #d63638;">' . __( 'Error:', 'flux-media-optimizer' ) . '</strong> ' . esc_html( $job_status['last_error'] );
-            if ( ( $job_status['retry_count'] ?? 0 ) < 3 ) {
-                $html .= '<br><button type="button" class="button button-secondary" onclick="fluxMediaRetryJob(' . esc_js( $attachment_id ) . ')" style="margin-top: 8px;">' . __( 'Retry', 'flux-media-optimizer' ) . '</button>';
-            }
-        }
-        
-        if ( $status === 'completed' && ! empty( $job_status['base_url'] ) ) {
-            $html .= '<br><strong>' . __( 'CDN Base URL:', 'flux-media-optimizer' ) . '</strong> ';
-            $html .= '<a href="' . esc_url( $job_status['base_url'] ) . '" target="_blank" style="color: #0073aa; text-decoration: none;">' . esc_html( $job_status['base_url'] ) . '</a>';
+        if ( $status === 'failed' ) {
+            $html .= '<br><em style="color: #d63638;">' . __( 'Processing failed. You may retry the conversion.', 'flux-media-optimizer' ) . '</em>';
         }
         
         $html .= '</div>';

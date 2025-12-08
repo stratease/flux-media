@@ -148,8 +148,21 @@ const SettingsPage = () => {
     }
   };
 
-  const handleRevalidateLicense = () => {
-    validateLicenseMutation.mutate();
+  const handleRevalidateLicense = async () => {
+    if (!licenseKey) {
+      return;
+    }
+    
+    // First activate the license to ensure it's activated
+    try {
+      await activateLicenseMutation.mutateAsync(licenseKey);
+      // After activation succeeds, validate the license
+      await validateLicenseMutation.mutateAsync();
+    } catch (error) {
+      // Error handling is done by the mutation hooks
+      // If activation fails, we still try to validate
+      await validateLicenseMutation.mutateAsync();
+    }
   };
 
   // Format date for display using WordPress date formatting
@@ -602,7 +615,7 @@ const SettingsPage = () => {
                                   <IconButton
                                     size="small"
                                     onClick={handleRevalidateLicense}
-                                    disabled={isLoading || licenseLoading || validateLicenseMutation.isPending || !licenseKey}
+                                    disabled={isLoading || licenseLoading || activateLicenseMutation.isPending || validateLicenseMutation.isPending || !licenseKey}
                                     sx={{ ml: 0.5 }}
                                   >
                                     <Refresh fontSize="small" />

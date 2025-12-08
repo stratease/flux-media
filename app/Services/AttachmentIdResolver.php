@@ -141,7 +141,7 @@ class AttachmentIdResolver {
 	/**
 	 * Resolve attachment ID from a CDN URL.
 	 *
-	 * Queries external_jobs table and attachment meta for matching CDN URLs.
+	 * Queries attachment meta for matching CDN URLs.
 	 *
 	 * @since 3.0.0
 	 * @param string $cdn_url CDN URL to resolve.
@@ -152,51 +152,14 @@ class AttachmentIdResolver {
 			return null;
 		}
 
-		global $wpdb;
-
-		// First, try to find by matching CDN URL in attachment meta.
-		$attachment_id = self::from_cdn_url_in_meta( $cdn_url );
-		if ( $attachment_id ) {
-			return $attachment_id;
-		}
-
-		// Fallback: try to find by base_url pattern in external_jobs table.
-		$table_name = $wpdb->prefix . 'flux_media_optimizer_external_jobs';
-		
-		// Check if table exists.
-		if ( $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $table_name ) ) !== $table_name ) {
-			return null;
-		}
-
-		// Parse URL to extract base path.
-		$parsed = wp_parse_url( $cdn_url );
-		if ( empty( $parsed['scheme'] ) || empty( $parsed['host'] ) ) {
-			return null;
-		}
-
-		$base_url = $parsed['scheme'] . '://' . $parsed['host'];
-		if ( ! empty( $parsed['path'] ) ) {
-			$path_parts = explode( '/', trim( $parsed['path'], '/' ) );
-			// Remove last two parts (format and filename) to get base path.
-			if ( count( $path_parts ) > 2 ) {
-				array_pop( $path_parts ); // Remove filename.
-				array_pop( $path_parts ); // Remove format.
-				$base_url .= '/' . implode( '/', $path_parts );
-			}
-		}
-		$base_url = trailingslashit( $base_url );
-
-		// Query external_jobs table for matching base_url.
-		$attachment_id = $wpdb->get_var( $wpdb->prepare(
-			"SELECT attachment_id FROM {$table_name} WHERE base_url = %s AND status = 'completed' ORDER BY id DESC LIMIT 1",
-			$base_url
-		) );
-
-		return $attachment_id ? (int) $attachment_id : null;
+		// Find by matching CDN URL in attachment meta.
+		return self::from_cdn_url_in_meta( $cdn_url );
 	}
 
 	/**
 	 * Resolve attachment ID from CDN URL stored in attachment meta.
+	 *
+	 * Uses dedicated CDN URLs meta field for efficient lookup.
 	 *
 	 * @since 3.0.0
 	 * @param string $cdn_url CDN URL to find.
@@ -205,13 +168,15 @@ class AttachmentIdResolver {
 	private static function from_cdn_url_in_meta( $cdn_url ) {
 		global $wpdb;
 
-		// Search in META_KEY_CONVERTED_FILES_BY_SIZE.
-		$meta_key = AttachmentMetaHandler::META_KEY_CONVERTED_FILES_BY_SIZE;
+		// Use dedicated CDN URLs meta field for efficient lookup.
+		$meta_key = AttachmentMetaHandler::META_KEY_CDN_URLS;
 		
-		// Query all attachments with this meta key.
+		// Query attachments with this meta key and search for matching URL.
+		// Use LIKE to find the URL in the serialized array.
 		$results = $wpdb->get_results( $wpdb->prepare(
-			"SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s",
-			$meta_key
+			"SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value LIKE %s",
+			$meta_key,
+			'%' . $wpdb->esc_like( $cdn_url ) . '%'
 		), ARRAY_A );
 
 		foreach ( $results as $row ) {
@@ -220,20 +185,9 @@ class AttachmentIdResolver {
 				continue;
 			}
 
-			// Search through all sizes and formats.
-			foreach ( $meta_value as $size_formats ) {
-				if ( ! is_array( $size_formats ) ) {
-					continue;
-				}
-				foreach ( $size_formats as $data ) {
-					// Extract URL from unified structure.
-					if ( is_array( $data ) && isset( $data['url'] ) ) {
-						$url_or_path = $data['url'];
-						if ( is_string( $url_or_path ) && $url_or_path === $cdn_url ) {
+			// Check if the CDN URL exists in the array.
+			if ( in_array( $cdn_url, $meta_value, true ) ) {
 							return (int) $row['post_id'];
-						}
-					}
-				}
 			}
 		}
 

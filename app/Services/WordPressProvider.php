@@ -144,19 +144,33 @@ class WordPressProvider {
      * Register WordPress hooks.
      *
      * @since 0.1.0
+     * @since 3.0.0 Optimized hook registration: removed redundant wp_generate_attachment_metadata hook, clarified hook purposes and timing relationships, updated comments to reflect all file types handling.
      * @return void
      */
     public function register_hooks() {
         // ===== CONVERT MEDIA =====
-        // Media upload hooks (handles both images and videos)
+        // Media upload hooks (handles all file types: images, videos, PDFs, documents, etc.)
         // Detection of local vs external processing happens inside callbacks.
+        // Primary hook for initial uploads - fires BEFORE sizes are generated.
+        // External processing: Submits jobs for all file types (images/videos get formats, others get CDN storage).
+        // Local processing: Processes images/videos only.
         add_action( 'add_attachment', [ $this, 'handle_media_upload' ] );
-        add_action( 'wp_generate_attachment_metadata', [ $this, 'handle_image_metadata_generation' ], 10, 2 );
         
-        // Ensure conversions run when attachments are edited or files are replaced
-        // Detection of local vs external processing happens inside callbacks.
+        // Catches size generation and metadata updates - fires AFTER sizes are generated.
+        // Critical for external processing to catch size generation (all file types).
+        // External processing: Processes all sizes when they become available.
+        // Local processing: Processes images/videos.
+        // Note: $processed_attachments prevents duplicate processing during initial upload.
         add_filter( 'wp_update_attachment_metadata', [ $this, 'handle_update_attachment_metadata' ], 10, 2 );
+        
+        // Handles file replacements (all file types).
+        // External processing: Submits new job for all file types.
+        // Local processing: Processes images/videos only.
         add_filter( 'update_attached_file', [ $this, 'handle_update_attached_file' ], 10, 2 );
+        
+        // Handles image editor saves (images only).
+        // External processing: Submits new job for edited image.
+        // Local processing: Processes edited image.
         add_filter( 'wp_save_image_editor_file', [ $this, 'handle_wp_save_image_editor_file' ], 10, 5 );
         
         // AJAX handlers for attachment actions
@@ -194,7 +208,10 @@ class WordPressProvider {
         // Hook into REST API to modify attachment responses directly
         // This ensures block editor gets converted URLs in REST API responses
         add_filter( 'rest_prepare_attachment', [ $this, 'handle_rest_prepare_attachment' ], 10, 3 );
-        // Hook into metadata updates to convert sizes as they're generated
+        // Hook into metadata updates to convert sizes as they're generated.
+        // Handles LOCAL size regeneration only (images only).
+        // Used when sizes are regenerated after initial upload (e.g., Regenerate Thumbnails plugin).
+        // Note: This does NOT handle external processing - external processing is handled by handle_update_attachment_metadata above.
         add_filter( 'wp_update_attachment_metadata', [ $this, 'handle_update_attachment_metadata_for_sizes' ], 10, 2 );
         // Filter srcset to use converted formats (prefer AVIF, fallback to WebP)
         add_filter( 'wp_calculate_image_srcset', [ $this, 'handle_image_srcset_filter' ], 10, 5 );
@@ -243,20 +260,52 @@ class WordPressProvider {
     }
 
     /**
-     * Handle media upload (images and videos).
+     * Check if attachment can be processed.
+     *
+     * Checks if conversion is disabled, if already processed in this request, and if external job is in progress.
+     * Prevents processing if job is 'queued' or 'processing'. Allows processing if 'completed' or 'failed' (for reprocessing scenarios).
+     *
+     * @since 3.0.0 Consolidated processing checks into single helper function that checks conversion disabled, request-level processing, and external job state from meta.
+     * @param int $attachment_id Attachment ID.
+     * @return bool True if processing should be skipped, false if processing can proceed.
+     */
+    private function should_skip_processing( $attachment_id ) {
+        // Check if conversion is disabled for this attachment
+        if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
+            return true;
+        }
+
+        // Check if already processed in this request
+        if ( $this->is_attachment_processed( $attachment_id ) ) {
+            return true;
+        }
+
+        // Check external job state - prevent processing if job is 'queued' or 'processing'
+        $job_state = AttachmentMetaHandler::get_external_job_state( $attachment_id );
+        if ( in_array( $job_state, [ 'queued', 'processing' ], true ) ) {
+            return true;
+        }
+
+        // Allow processing if state is 'completed', 'failed', or null (no state set)
+        return false;
+    }
+
+    /**
+     * Handle media upload (all file types).
+     *
+     * Primary hook for initial uploads - fires BEFORE sizes are generated.
+     * Processes via service locator (handles ALL file types: images, videos, PDFs, documents, etc.).
+     *
+     * External processing: Submits jobs for all file types (images/videos get formats, others get CDN storage).
+     * Local processing: Processes images/videos only.
      *
      * @since 2.0.1
      * @param int $attachment_id Attachment ID.
      * @return void
      */
     public function handle_media_upload( $attachment_id ) {
-        // Check if conversion is disabled for this attachment
-        if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
-            return;
-        }
-
-        // Check if already processed in this request
-        if ( $this->is_attachment_processed( $attachment_id ) ) {
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $attachment_id ) ) {
             return;
         }
 
@@ -271,19 +320,6 @@ class WordPressProvider {
         $this->mark_attachment_processed( $attachment_id );
     }
 
-    /**
-     * Handle image metadata generation.
-     *
-     * @since 0.1.0
-     * @param array $metadata Attachment metadata.
-     * @param int   $attachment_id Attachment ID.
-     * @return array Modified metadata.
-     */
-    public function handle_image_metadata_generation( $metadata, $attachment_id ) {
-        // This hook is called after image metadata is generated
-        // We can use this to ensure our conversion happens after WordPress processes the image
-        return $metadata;
-    }
 
 
     /**
@@ -297,29 +333,6 @@ class WordPressProvider {
         $this->cleanup_converted_files( $attachment_id );
     }
 
-    /**
-     * Check if an attachment is an animated GIF.
-     *
-     * @since 3.0.0
-     * @param int $attachment_id Attachment ID.
-     * @return bool True if animated GIF, false otherwise.
-     */
-    private function is_animated_gif_attachment( $attachment_id ) {
-        $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! file_exists( $file_path ) ) {
-            return false;
-        }
-
-        // Check MIME type first.
-        $mime_type = get_post_mime_type( $attachment_id );
-        if ( $mime_type !== 'image/gif' ) {
-            return false;
-        }
-
-        // Use GifAnimationDetector to check if animated.
-        $gif_detector = new GifAnimationDetector( $this->logger );
-        return $gif_detector->is_animated( $file_path );
-    }
 
     /**
      * Process image conversion.
@@ -340,8 +353,8 @@ class WordPressProvider {
             return;
         }
 
-        // Check if this is an animated GIF.
-        $is_animated_gif = $this->is_animated_gif_attachment( $attachment_id );
+        // Check if this is an animated GIF using ImageConverter.
+        $is_animated_gif = $this->image_converter->is_animated_gif( $attachment_id );
 
         // Ensure metadata exists and all sizes are generated.
         $metadata = wp_get_attachment_metadata( $attachment_id );
@@ -1175,19 +1188,18 @@ class WordPressProvider {
      * Detects when new image sizes are added to metadata and converts them to WebP/AVIF.
      * This ensures we convert sizes as WordPress generates them during upload/regeneration.
      *
+     * Handles LOCAL size regeneration only (images only).
+     * Used when sizes are regenerated after initial upload (e.g., Regenerate Thumbnails plugin).
+     * Note: This does NOT handle external processing - external processing is handled by handle_update_attachment_metadata.
+     *
      * @since 1.0.0
      * @param array $metadata       Metadata array.
      * @param int   $attachment_id  Attachment ID.
      * @return array Unmodified metadata (we don't modify, just trigger conversion).
      */
     public function handle_update_attachment_metadata_for_sizes( $metadata, $attachment_id ) {
-        // Bail if conversion disabled for this attachment
-        if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
-            return $metadata;
-        }
-
-        // Check if already processed in this request
-        if ( $this->is_attachment_processed( $attachment_id ) ) {
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $attachment_id ) ) {
             return $metadata;
         }
 
@@ -1890,9 +1902,19 @@ class WordPressProvider {
             ];
         }
 
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $attachment_id ) ) {
+            return [
+                'success' => false,
+                'errors' => ['Processing skipped: conversion disabled, already processed, or job in progress'],
+            ];
+        }
+
         // Determine if it's an image or video
         if ( $this->image_converter->is_supported_image( $file_path ) ) {
             $this->process_image_conversion( $attachment_id, $file_path );
+            // Mark as processed to prevent duplicate processing
+            $this->mark_attachment_processed( $attachment_id );
             return [
                 'success' => true,
                 'type' => 'image',
@@ -1901,6 +1923,8 @@ class WordPressProvider {
         } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
             // Enqueue video processing for async processing
             $this->enqueue_video_processing( $attachment_id, $file_path );
+            // Mark as processed to prevent duplicate processing
+            $this->mark_attachment_processed( $attachment_id );
             return [
                 'success' => true,
                 'type' => 'video',
@@ -2047,9 +2071,8 @@ class WordPressProvider {
      * @return void
      */
     public function handle_process_video_cron( $attachment_id, $file_path ) {
-        // Check if conversion is disabled for this attachment
-        if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
-            $this->logger->info( "Video processing cron skipped: conversion disabled for attachment {$attachment_id}" );
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $attachment_id ) ) {
             return;
         }
 
@@ -2059,6 +2082,9 @@ class WordPressProvider {
 
         $processor = $this->service_locator->get_processor();
         $processor->process_video_cron( $attachment_id, $file_path );
+        
+        // Mark as processed
+        $this->mark_attachment_processed( $attachment_id );
     }
 
     /**
@@ -2095,13 +2121,8 @@ class WordPressProvider {
             return $override;
         }
 
-        // Check if conversion is disabled for this attachment
-        if ( AttachmentMetaHandler::is_conversion_disabled( $post_id ) ) {
-            return $override;
-        }
-
-        // Check if already processed in this request
-        if ( $this->is_attachment_processed( $post_id ) ) {
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $post_id ) ) {
             return $override;
         }
 
@@ -2119,23 +2140,25 @@ class WordPressProvider {
     }
 
     /**
-     * Handle attachment metadata updates to reconvert edited images.
+     * Handle attachment metadata updates.
      *
-     * Runs when image metadata is updated, including after edits like crop/rotate.
+     * Critical hook that catches size generation and metadata updates.
+     * Fires AFTER sizes are generated (unlike add_attachment which fires before).
+     * Processes via service locator (handles ALL file types: images, videos, PDFs, documents, etc.).
+     *
+     * External processing: Catches size generation and processes all sizes when they become available.
+     * Local processing: Processes images/videos.
+     *
+     * Note: $processed_attachments prevents duplicate processing during initial upload.
      *
      * @since 2.0.1
      * @param array $data Attachment metadata.
      * @param int   $attachment_id Attachment ID.
-     * @return array Unmodified metadata array.
+     * @return array Modified metadata array.
      */
     public function handle_update_attachment_metadata( $data, $attachment_id ) {
-        // Check if conversion is disabled for this attachment
-        if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
-            return $data;
-        }
-
-        // Check if already processed in this request
-        if ( $this->is_attachment_processed( $attachment_id ) ) {
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $attachment_id ) ) {
             return $data;
         }
 
@@ -2164,13 +2187,8 @@ class WordPressProvider {
      * @return string File path (unmodified).
      */
     public function handle_update_attached_file( $file, $attachment_id ) {
-        // Check if conversion is disabled for this attachment
-        if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
-            return $file;
-        }
-
-        // Check if already processed in this request
-        if ( $this->is_attachment_processed( $attachment_id ) ) {
+        // Check if processing should be skipped
+        if ( $this->should_skip_processing( $attachment_id ) ) {
             return $file;
         }
 

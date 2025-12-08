@@ -163,30 +163,6 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	}
 
 	/**
-	 * Check if external job is in a "done" state (completed or failed).
-	 *
-	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return bool True if job is completed or failed, false otherwise.
-	 */
-	private function is_job_done( $attachment_id ) {
-		$state = AttachmentMetaHandler::get_external_job_state( $attachment_id );
-		return in_array( $state, [ 'completed', 'failed' ], true );
-	}
-
-	/**
-	 * Check if external job is currently processing (queued or processing).
-	 *
-	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return bool True if job is queued or processing, false otherwise.
-	 */
-	private function is_job_processing( $attachment_id ) {
-		$state = AttachmentMetaHandler::get_external_job_state( $attachment_id );
-		return in_array( $state, [ 'queued', 'processing' ], true );
-	}
-
-	/**
 	 * Update external job state for an attachment.
 	 *
 	 * @since 3.0.0
@@ -204,18 +180,15 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	 * For images and videos: builds operations array with formats and sizes (if applicable) for processing and optimization.
 	 * For all other file types: sends simple operation with 'full' key_name for CDN storage (no processing, just storage).
 	 *
+	 * Note: Conversion disabled, request-level duplicate processing, and external job state checks are handled
+	 * by WordPressProvider::should_skip_processing() before this method is called.
+	 *
 	 * @since 3.0.0
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $file_path     File path.
 	 * @return void
 	 */
 	private function submit_processing_job( $attachment_id, $file_path ) {
-		// Check if job is already in progress or done - prevent resubmission.
-		if ( $this->is_job_processing( $attachment_id ) ) {
-			$this->logger->debug( "Skipping job submission for attachment {$attachment_id}: job already in progress" );
-			return;
-		}
-
 		// Update state to 'queued' before submission.
 		$this->update_job_state( $attachment_id, 'queued' );
 

@@ -360,6 +360,29 @@ class ImageConverter implements Converter {
 	}
 
 	/**
+	 * Check if an attachment is an animated GIF.
+	 *
+	 * @since 3.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True if animated GIF, false otherwise.
+	 */
+	public function is_animated_gif( $attachment_id ) {
+		$file_path = get_attached_file( $attachment_id );
+		if ( ! $file_path || ! file_exists( $file_path ) ) {
+			return false;
+		}
+
+		// Check MIME type first.
+		$mime_type = get_post_mime_type( $attachment_id );
+		if ( $mime_type !== 'image/gif' ) {
+			return false;
+		}
+
+		// Use GifAnimationDetector to check if animated.
+		return $this->gif_detector->is_animated( $file_path );
+	}
+
+	/**
 	 * Get file size reduction percentage.
 	 *
 	 * @since 0.1.0
