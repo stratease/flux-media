@@ -57,26 +57,13 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	}
 
 	/**
-	 * Process media upload.
-	 *
-	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return void
-	 */
-	public function process_media_upload( $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
-			return;
-		}
-
-		$this->submit_processing_job( $attachment_id, $file_path );
-	}
-
-	/**
 	 * Process attachment metadata update.
 	 *
+	 * For images, this is called after sizes are generated, so metadata contains size information.
+	 * The metadata is used by submit_processing_job to build operations for all sizes.
+	 *
 	 * @since 3.0.0
-	 * @param array $data Attachment metadata.
+	 * @param array $data Attachment metadata (contains sizes for images).
 	 * @param int   $attachment_id Attachment ID.
 	 * @return array Modified metadata.
 	 */
@@ -86,6 +73,7 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 			return $data;
 		}
 
+		// Submit processing job - submit_processing_job will fetch metadata which now includes sizes.
 		$this->submit_processing_job( $attachment_id, $file_path );
 
 		return $data;
@@ -163,6 +151,30 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	}
 
 	/**
+	 * Process manual conversion for an attachment.
+	 *
+	 * Handles manual conversion requests (e.g., from AJAX or admin actions).
+	 * Submits a processing job to the external service for all file types.
+	 *
+	 * @since 3.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True if conversion was initiated successfully, false otherwise.
+	 */
+	public function process_manual_conversion( $attachment_id ) {
+		$file_path = get_attached_file( $attachment_id );
+		if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
+			return false;
+		}
+
+		// Submit processing job (handles errors internally)
+		$this->submit_processing_job( $attachment_id, $file_path );
+
+		// Return true if file is valid (job submission attempted)
+		// Note: submit_processing_job handles errors internally and updates state accordingly
+		return true;
+	}
+
+	/**
 	 * Update external job state for an attachment.
 	 *
 	 * @since 3.0.0
@@ -213,10 +225,11 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 		}
 
 		// Get formats to process.
-		$formats = $is_image ? Settings::get_image_formats() : Settings::get_video_formats();
-		
-		if ( empty( $formats ) ) {
-			return;
+		$formats = [];
+		if ( $is_image ) {
+			$formats = Settings::get_image_formats();
+		} elseif ( $is_video ) {
+			$formats = Settings::get_video_formats();
 		}
 
 		// Build operations array.

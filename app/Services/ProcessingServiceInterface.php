@@ -18,16 +18,11 @@ namespace FluxMedia\App\Services;
 interface ProcessingServiceInterface {
 
 	/**
-	 * Process media upload.
-	 *
-	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return void
-	 */
-	public function process_media_upload( $attachment_id );
-
-	/**
 	 * Process attachment metadata update.
+	 *
+	 * Handles all media uploads after metadata is generated.
+	 * For images: waits for sizes to be available in metadata.
+	 * For non-images: processes immediately.
 	 *
 	 * @since 3.0.0
 	 * @param array $data Attachment metadata.
@@ -76,5 +71,18 @@ interface ProcessingServiceInterface {
 	 * @return void
 	 */
 	public function process_bulk_conversion_cron();
+
+	/**
+	 * Process manual conversion for an attachment.
+	 *
+	 * Handles manual conversion requests (e.g., from AJAX or admin actions).
+	 * For images: processes synchronously.
+	 * For videos: enqueues for async processing.
+	 *
+	 * @since 3.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True if conversion was initiated successfully, false otherwise.
+	 */
+	public function process_manual_conversion( $attachment_id );
 }
 

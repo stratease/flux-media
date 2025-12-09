@@ -108,13 +108,17 @@ class WebhookController extends BaseController {
 		$cdn_urls = $request->get_param( 'cdn_urls' );
 
 		// Determine status: if cdn_urls provided, status is 'completed', otherwise 'failed'.
-		$status = ! empty( $cdn_urls ) ? 'completed' : 'failed';
+		$status = ! empty( $cdn_urls ) && is_array( $cdn_urls ) ? 'completed' : 'failed';
 
-		// Update job state in post meta.
-		AttachmentMetaHandler::set_external_job_state( $attachment_id, $status );
+		// Update job state in post meta using AttachmentMetaHandler.
+		$state_updated = AttachmentMetaHandler::set_external_job_state( $attachment_id, $status );
+		if ( ! $state_updated ) {
+			$this->logger->error( "Failed to update job state for attachment {$attachment_id} to status: {$status}" );
+			return $this->create_error_response( 'Failed to update job state', 'state_update_failed', 500 );
+		}
 
-		// Process cdn_urls and store in attachment meta.
-		if ( ! empty( $cdn_urls ) && is_array( $cdn_urls ) && $status === 'completed' ) {
+		// Handle successful processing.
+		if ( $status === 'completed' ) {
 			// Structure: {key_name: {format: {url, filesize}}}
 			// Extract URLs and file sizes separately.
 			$converted_files_by_size = [];
@@ -210,10 +214,15 @@ class WebhookController extends BaseController {
 
 				$this->logger->info( "Stored CDN URLs for attachment {$attachment_id} with sizes: " . implode( ', ', array_keys( $converted_files_by_size ) ) );
 			}
-		}
 
-		if ( $status === 'completed' ) {
-			$this->logger->info( "Job completed for attachment {$attachment_id}" );
+			$this->logger->info( "Job completed successfully for attachment {$attachment_id}" );
+		} else {
+			// Note: We don't clear converted_files_by_size here because:
+			// 1. There might be valid local conversions that should be preserved
+			// 2. The failed status is already set, which prevents reprocessing
+			// 3. Users can manually retry conversion if needed
+
+			$this->logger->error( "Job failed for attachment {$attachment_id}. No CDN URLs provided in webhook." );
 		}
 
 		return $this->create_success_response( null, 'Webhook processed successfully', 200 );

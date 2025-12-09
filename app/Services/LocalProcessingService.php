@@ -99,38 +99,6 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	}
 
 	/**
-	 * Process media upload.
-	 *
-	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return void
-	 */
-	public function process_media_upload( $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path ) {
-			return;
-		}
-		
-		$filetype = wp_check_filetype( $file_path );
-		if ( empty( $filetype['ext'] ) ) {
-			return;
-		}
-
-		// Determine file type and process accordingly
-		if ( $this->image_converter->is_supported_image( $file_path ) ) {
-			// Check if image auto-conversion is enabled
-			if ( Settings::is_image_auto_convert_enabled() ) {
-				$this->wordpress_provider->process_image_conversion( $attachment_id, $file_path );
-			}
-		} elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
-			// Check if video auto-conversion is enabled
-			if ( Settings::is_video_auto_convert_enabled() ) {
-				$this->wordpress_provider->enqueue_video_processing( $attachment_id, $file_path );
-			}
-		}
-	}
-
-	/**
 	 * Process attachment metadata update.
 	 *
 	 * @since 3.0.0
@@ -270,6 +238,37 @@ class LocalProcessingService implements ProcessingServiceInterface {
 		$results = $this->bulk_converter->process_bulk_conversion( 5 );
 
 		$this->logger->info( 'Bulk conversion cron completed. Processed: ' . $results['processed'] . ', Converted: ' . $results['converted'] . ', Errors: ' . $results['errors'] );
+	}
+
+	/**
+	 * Process manual conversion for an attachment.
+	 *
+	 * Handles manual conversion requests (e.g., from AJAX or admin actions).
+	 * For images: processes synchronously.
+	 * For videos: enqueues for async processing.
+	 *
+	 * @since 3.0.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True if conversion was initiated successfully, false otherwise.
+	 */
+	public function process_manual_conversion( $attachment_id ) {
+		$file_path = get_attached_file( $attachment_id );
+		if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
+			return false;
+		}
+
+		// Determine if it's an image or video
+		if ( $this->image_converter->is_supported_image( $file_path ) ) {
+			// Process image conversion synchronously
+			$this->wordpress_provider->process_image_conversion( $attachment_id, $file_path );
+			return true;
+		} elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
+			// Enqueue video processing for async processing
+			$this->wordpress_provider->enqueue_video_processing( $attachment_id, $file_path );
+			return true;
+		}
+
+		return false;
 	}
 }
 

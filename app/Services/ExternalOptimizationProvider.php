@@ -65,9 +65,6 @@ class ExternalOptimizationProvider {
 	 * @return void
 	 */
 	public function register_hooks() {
-		// Handle media uploads.
-		add_action( 'add_attachment', [ $this, 'handle_media_upload' ] );
-		
 		// Webhook endpoint is registered via WebhookController in Plugin class.
 		
 		// Schedule retry cron for failed jobs.
@@ -76,118 +73,6 @@ class ExternalOptimizationProvider {
 		}
 		add_action( 'flux_media_optimizer_retry_failed_jobs', [ $this, 'retry_failed_jobs' ] );
 	}
-
-	/**
-	 * Handle media upload and submit to external service.
-	 *
-	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return void
-	 */
-	public function handle_media_upload( $attachment_id ) {
-		// Check if conversion is disabled for this attachment.
-		if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
-			return;
-		}
-
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
-			return;
-		}
-
-		// Determine file type.
-		$image_converter = new ImageConverter( $this->logger );
-		$video_converter = new VideoConverter( $this->logger );
-
-		$is_image = $image_converter->is_supported_image( $file_path );
-		$is_video = $video_converter->is_supported_video( $file_path );
-
-		if ( ! $is_image && ! $is_video ) {
-			return;
-		}
-
-		// Check if auto-conversion is enabled.
-		if ( $is_image && ! Settings::is_image_auto_convert_enabled() ) {
-			return;
-		}
-		if ( $is_video && ! Settings::is_video_auto_convert_enabled() ) {
-			return;
-		}
-
-		// Get formats to process.
-		$formats = $is_image ? Settings::get_image_formats() : Settings::get_video_formats();
-		
-		// Get mimetype.
-		$mimetype = get_post_mime_type( $attachment_id );
-		if ( ! $mimetype ) {
-			$mimetype = wp_check_filetype( $file_path )['type'] ?? '';
-		}
-		
-		// Build operations array.
-		$operations = [];
-		
-		if ( $is_image ) {
-			// Get all image sizes with metadata.
-			$metadata = wp_get_attachment_metadata( $attachment_id );
-			
-			// Always include full size operation.
-			$full_operation = [
-				'formats'  => $formats,
-				'key_name' => 'full',
-			];
-			
-			// Add resize dimensions for full size if available.
-			if ( isset( $metadata['width'] ) && isset( $metadata['height'] ) ) {
-				$full_operation['resize'] = [
-					'width'  => (int) $metadata['width'],
-					'height' => (int) $metadata['height'],
-				];
-			}
-			
-			$operations[] = $full_operation;
-			
-			// Add operations for each WordPress image size.
-			if ( ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
-				foreach ( $metadata['sizes'] as $size_name => $size_data ) {
-					$operation = [
-						'formats'  => $formats,
-						'key_name' => $size_name,
-					];
-					
-					// Add resize dimensions if available.
-					if ( isset( $size_data['width'] ) && isset( $size_data['height'] ) ) {
-						$operation['resize'] = [
-							'width'  => (int) $size_data['width'],
-							'height' => (int) $size_data['height'],
-						];
-					}
-					
-					$operations[] = $operation;
-				}
-			}
-		} else {
-			// Videos only have full size.
-			$operations[] = [
-				'formats'  => $formats,
-				'key_name' => 'full',
-			];
-		}
-		
-		// Submit job to external service.
-		$result = $this->api_client->submit_job( $attachment_id, $operations, $mimetype );
-
-		if ( ! $result['success'] ) {
-			$this->logger->error( "Failed to submit job for attachment {$attachment_id}: " . ( $result['error'] ?? 'Unknown error' ) );
-			AttachmentMetaHandler::set_external_job_state( $attachment_id, 'failed' );
-			$this->add_admin_notice( $attachment_id, $result['error'] ?? 'Failed to submit job to external service' );
-			return;
-		}
-
-		// Store job state in meta.
-		AttachmentMetaHandler::set_external_job_state( $attachment_id, $result['status'] );
-		$this->logger->debug( "Job submitted successfully for attachment {$attachment_id}" );
-			}
-
 
 	/**
 	 * Get CDN URL for an attachment.
@@ -264,7 +149,6 @@ class ExternalOptimizationProvider {
 		}
 
 		// Get webhook URL and mimetype.
-		$webhook_url = WebhookController::get_webhook_url();
 		$mimetype = get_post_mime_type( $attachment_id );
 		if ( ! $mimetype ) {
 			$mimetype = wp_check_filetype( $file_path )['type'] ?? '';

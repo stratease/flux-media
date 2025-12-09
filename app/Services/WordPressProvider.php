@@ -102,6 +102,14 @@ class WordPressProvider {
     private static $processed_attachments = [];
 
     /**
+     * Track attachments pending processing after metadata stabilizes.
+     *
+     * @since 3.0.0
+     * @var array Array of attachment IDs pending processing.
+     */
+    private static $pending_attachments = [];
+
+    /**
      * Constructor.
      *
      * @since 0.1.0
@@ -144,24 +152,15 @@ class WordPressProvider {
      * Register WordPress hooks.
      *
      * @since 0.1.0
-     * @since 3.0.0 Optimized hook registration: removed redundant wp_generate_attachment_metadata hook, clarified hook purposes and timing relationships, updated comments to reflect all file types handling.
+     * @since 3.0.0 Optimized hook registration: removed redundant hooks, consolidated to single pipeline via handle_update_attachment_metadata.
      * @return void
      */
     public function register_hooks() {
         // ===== CONVERT MEDIA =====
-        // Media upload hooks (handles all file types: images, videos, PDFs, documents, etc.)
-        // Detection of local vs external processing happens inside callbacks.
-        // Primary hook for initial uploads - fires BEFORE sizes are generated.
-        // External processing: Submits jobs for all file types (images/videos get formats, others get CDN storage).
-        // Local processing: Processes images/videos only.
-        add_action( 'add_attachment', [ $this, 'handle_media_upload' ] );
-        
-        // Catches size generation and metadata updates - fires AFTER sizes are generated.
-        // Critical for external processing to catch size generation (all file types).
-        // External processing: Processes all sizes when they become available.
-        // Local processing: Processes images/videos.
-        // Note: $processed_attachments prevents duplicate processing during initial upload.
-        add_filter( 'wp_update_attachment_metadata', [ $this, 'handle_update_attachment_metadata' ], 10, 2 );
+        // Early hook to detect metadata updates and schedule processing for later.
+        // wp_update_attachment_metadata can be called multiple times during upload,
+        // so we defer actual processing to a later hook when metadata is stable.
+        add_filter( 'wp_update_attachment_metadata', [ $this, 'schedule_metadata_processing' ], 10, 2 );
         
         // Handles file replacements (all file types).
         // External processing: Submits new job for all file types.
@@ -196,23 +195,21 @@ class WordPressProvider {
         // Enable filters for frontend, REST API requests, and admin (except media library pages)
         // This ensures editor gets converted URLs when saving blocks, while avoiding confusion in media library
         if( ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ! $this->is_media_library_page() ) {
+            // CRITICAL: image_downsize intercepts ALL WordPress image lookups (thumbnails, medium, large, WooCommerce sizes, etc.)
+            add_filter( 'image_downsize', [ $this, 'handle_image_downsize_filter' ], 10, 3 );
             // Filter all WordPress functions that return attachment URLs
             // These are the primary hooks that blocks/plugins use to get image URLs
             // When blocks are saved in the editor, REST API requests these URLs, and we convert them here
             // The converted URL is then stored in block attributes, so CSS generation gets the converted URL
             add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
-            add_filter( 'wp_get_attachment_image_url', [ $this, 'handle_attachment_image_url_filter' ], 10, 3 );
+            // Note: wp_get_attachment_image_url() doesn't have its own filter, but wp_get_attachment_image_src() does
+            // wp_get_attachment_image_url() calls wp_get_attachment_image_src() internally, so our filter on that hook will catch it
             add_filter( 'wp_get_attachment_image_src', [ $this, 'handle_attachment_image_src_filter' ], 10, 4 );
         }
         
         // Hook into REST API to modify attachment responses directly
         // This ensures block editor gets converted URLs in REST API responses
         add_filter( 'rest_prepare_attachment', [ $this, 'handle_rest_prepare_attachment' ], 10, 3 );
-        // Hook into metadata updates to convert sizes as they're generated.
-        // Handles LOCAL size regeneration only (images only).
-        // Used when sizes are regenerated after initial upload (e.g., Regenerate Thumbnails plugin).
-        // Note: This does NOT handle external processing - external processing is handled by handle_update_attachment_metadata above.
-        add_filter( 'wp_update_attachment_metadata', [ $this, 'handle_update_attachment_metadata_for_sizes' ], 10, 2 );
         // Filter srcset to use converted formats (prefer AVIF, fallback to WebP)
         add_filter( 'wp_calculate_image_srcset', [ $this, 'handle_image_srcset_filter' ], 10, 5 );
         add_filter( 'wp_content_img_tag', [ $this, 'handle_content_images_filter' ], 25, 3 );
@@ -262,10 +259,10 @@ class WordPressProvider {
     /**
      * Check if attachment can be processed.
      *
-     * Checks if conversion is disabled, if already processed in this request, and if external job is in progress.
-     * Prevents processing if job is 'queued' or 'processing'. Allows processing if 'completed' or 'failed' (for reprocessing scenarios).
+     * Prevents processing if conversion is disabled, already processed in this request, or external job is in progress.
+     * Allows reprocessing if job is 'completed' or 'failed'.
      *
-     * @since 3.0.0 Consolidated processing checks into single helper function that checks conversion disabled, request-level processing, and external job state from meta.
+     * @since 3.0.0
      * @param int $attachment_id Attachment ID.
      * @return bool True if processing should be skipped, false if processing can proceed.
      */
@@ -290,35 +287,6 @@ class WordPressProvider {
         return false;
     }
 
-    /**
-     * Handle media upload (all file types).
-     *
-     * Primary hook for initial uploads - fires BEFORE sizes are generated.
-     * Processes via service locator (handles ALL file types: images, videos, PDFs, documents, etc.).
-     *
-     * External processing: Submits jobs for all file types (images/videos get formats, others get CDN storage).
-     * Local processing: Processes images/videos only.
-     *
-     * @since 2.0.1
-     * @param int $attachment_id Attachment ID.
-     * @return void
-     */
-    public function handle_media_upload( $attachment_id ) {
-        // Check if processing should be skipped
-        if ( $this->should_skip_processing( $attachment_id ) ) {
-            return;
-        }
-
-        if ( ! $this->service_locator ) {
-            return;
-        }
-
-        $processor = $this->service_locator->get_processor();
-        $processor->process_media_upload( $attachment_id );
-        
-        // Mark as processed
-        $this->mark_attachment_processed( $attachment_id );
-    }
 
 
 
@@ -337,11 +305,11 @@ class WordPressProvider {
     /**
      * Process image conversion.
      *
-     * Converts all WordPress image sizes (full, thumbnail, medium, large, etc.) to WebP/AVIF formats.
-     * Ensures all registered WordPress image sizes are generated and converted.
-     * Do not check our disabled flag here - sometimes we run this from explicit image conversions which should override.
+     * Converts all WordPress image sizes to WebP/AVIF formats. Supports incremental conversion
+     * (skips sizes already fully converted). Does not check disabled flag as explicit conversions should override.
      *
      * @since 2.0.1
+     * @since 3.0.0 Added incremental conversion support and animated GIF handling via ImageConverter.
      * @param int    $attachment_id Attachment ID.
      * @param string $file_path Source file path.
      * @return void
@@ -357,15 +325,20 @@ class WordPressProvider {
         $is_animated_gif = $this->image_converter->is_animated_gif( $attachment_id );
 
         // Ensure metadata exists and all sizes are generated.
+        // Note: When called from process_metadata_update, metadata already exists.
+        // Only generate if called from manual conversion or other contexts.
         $metadata = wp_get_attachment_metadata( $attachment_id );
         if ( empty( $metadata ) || empty( $metadata['file'] ) ) {
             // Generate metadata if it doesn't exist (this will create all sizes).
+            // This can trigger wp_update_attachment_metadata hook again, but should_skip_processing will prevent duplicate processing.
             $metadata = wp_generate_attachment_metadata( $attachment_id, $file_path );
             if ( empty( $metadata ) ) {
                 $this->logger->error( "Failed to generate metadata for attachment {$attachment_id}" );
                 return;
             }
             wp_update_attachment_metadata( $attachment_id, $metadata );
+            // Re-fetch metadata after generation to ensure we have the latest
+            $metadata = wp_get_attachment_metadata( $attachment_id );
         }
 
         // Get all image sizes for this attachment (includes full + all registered sizes).
@@ -849,6 +822,7 @@ class WordPressProvider {
      * Clean up converted files when attachment is deleted.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler.
      * @param int $attachment_id Attachment ID.
      * @return void
      */
@@ -856,8 +830,7 @@ class WordPressProvider {
         // Get converted files by size (new structure)
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
         
-        
-        if ( empty( $converted_files_by_size ) && empty( $converted_files ) ) {
+        if ( empty( $converted_files_by_size ) ) {
             return;
         }
 
@@ -878,83 +851,42 @@ class WordPressProvider {
                 if ( ! is_array( $size_formats ) ) {
                     continue;
                 }
-                foreach ( $size_formats as $format => $file_path ) {
-                    // Ensure file_path is a string (skip if array or invalid)
-                    if ( ! is_string( $file_path ) || empty( $file_path ) ) {
+                foreach ( $size_formats as $format => $data ) {
+                    // Extract URL/path from unified structure
+                    $url_or_path = null;
+                    if ( is_array( $data ) && isset( $data['url'] ) ) {
+                        $url_or_path = $data['url'];
+                    } elseif ( is_string( $data ) ) {
+                        $url_or_path = $data;
+                    }
+                    
+                    // Skip if invalid or CDN URL
+                    if ( ! is_string( $url_or_path ) || empty( $url_or_path ) ) {
                         continue;
                     }
+                    
+                    // Skip CDN URLs (only remove from meta, don't delete)
+                    if ( AttachmentMetaHandler::is_file_url( $url_or_path ) ) {
+                        continue;
+                    }
+                    
                     $total_count++;
-                    if ( $wp_filesystem && $wp_filesystem->exists( $file_path ) && $wp_filesystem->delete( $file_path ) ) {
+                    if ( $wp_filesystem && $wp_filesystem->exists( $url_or_path ) && $wp_filesystem->delete( $url_or_path ) ) {
                         $deleted_count++;
-                        $this->logger->info( "Deleted converted file: {$file_path} (size: {$size_name}, format: {$format})" );
+                        $this->logger->info( "Deleted converted file: {$url_or_path} (size: {$size_name}, format: {$format})" );
                     } else {
-                        $this->logger->warning( "Failed to delete converted file: {$file_path} (size: {$size_name}, format: {$format})" );
+                        $this->logger->warning( "Failed to delete converted file: {$url_or_path} (size: {$size_name}, format: {$format})" );
                     }
                 }
             }
         }
         
-        // Delete files from legacy structure (avoid duplicates)
-        if ( ! empty( $converted_files ) ) {
-            foreach ( $converted_files as $format => $data ) {
-                // Extract URL/path from unified structure (handles both new and legacy formats).
-                $url_or_path = null;
-                if ( is_array( $data ) && isset( $data['url'] ) ) {
-                    // New format: array with 'url' and 'filesize'.
-                    $url_or_path = $data['url'];
-                } elseif ( is_string( $data ) ) {
-                    // Legacy format: string URL/path.
-                    $url_or_path = $data;
-                }
-                
-                // Ensure url_or_path is a string (skip if invalid)
-                if ( ! is_string( $url_or_path ) || empty( $url_or_path ) ) {
-                    continue;
-                }
-                
-                // Skip if already deleted from size-specific structure
-                $full_data = $converted_files_by_size['full'][ $format ] ?? null;
-                $full_url_or_path = null;
-                if ( is_array( $full_data ) && isset( $full_data['url'] ) ) {
-                    $full_url_or_path = $full_data['url'];
-                } elseif ( is_string( $full_data ) ) {
-                    $full_url_or_path = $full_data;
-                }
-                
-                if ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'][ $format ] ) && $full_url_or_path === $url_or_path ) {
-                    continue;
-                }
-                $total_count++;
-                
-                // Check if it's a URL (CDN) - skip deletion for URLs, only remove from meta.
-                if ( AttachmentMetaHandler::is_file_url( $url_or_path ) ) {
-                    $this->logger->info( "Skipped deletion of CDN URL: {$url_or_path} (format: {$format})" );
-                    continue;
-                }
-                
-                // It's a file path, proceed with deletion.
-                if ( $wp_filesystem && $wp_filesystem->exists( $url_or_path ) && $wp_filesystem->delete( $url_or_path ) ) {
-                    $deleted_count++;
-                    $this->logger->info( "Deleted converted file: {$url_or_path} (format: {$format})" );
-                } else {
-                    $this->logger->warning( "Failed to delete converted file: {$url_or_path} (format: {$format})" );
-                }
-            }
-        }
 
         // Clear post meta data
         AttachmentMetaHandler::delete_all( $attachment_id );
 
         $this->logger->info( "Deleted {$deleted_count}/{$total_count} converted files for attachment {$attachment_id}" );
     }
-
-    /**
-     * Get converted file paths for an attachment.
-     *
-     * @since 0.1.0
-     * @param int $attachment_id WordPress attachment ID.
-     * @return array Array of format => file_path mappings.
-     */
 
     /**
      * Get converted file path for a specific format.
@@ -993,6 +925,7 @@ class WordPressProvider {
      * Delete all converted files for an attachment.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler.
      * @param int $attachment_id WordPress attachment ID.
      * @return bool True if files were deleted successfully, false otherwise.
      */
@@ -1058,53 +991,6 @@ class WordPressProvider {
             }
         }
         
-        // Delete files from legacy structure (avoid duplicates)
-        if ( ! empty( $converted_files ) ) {
-            foreach ( $converted_files as $format => $data ) {
-                // Extract URL/path from unified structure (handles both new and legacy formats).
-                $url_or_path = null;
-                if ( is_array( $data ) && isset( $data['url'] ) ) {
-                    // New format: array with 'url' and 'filesize'.
-                    $url_or_path = $data['url'];
-                } elseif ( is_string( $data ) ) {
-                    // Legacy format: string URL/path.
-                    $url_or_path = $data;
-                }
-                
-                // Ensure url_or_path is a string (skip if invalid)
-                if ( ! is_string( $url_or_path ) || empty( $url_or_path ) ) {
-                    continue;
-                }
-                
-                // Skip if already deleted from size-specific structure
-                $full_data = $converted_files_by_size['full'][ $format ] ?? null;
-                $full_url_or_path = null;
-                if ( is_array( $full_data ) && isset( $full_data['url'] ) ) {
-                    $full_url_or_path = $full_data['url'];
-                } elseif ( is_string( $full_data ) ) {
-                    $full_url_or_path = $full_data;
-                }
-                
-                if ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'][ $format ] ) && $full_url_or_path === $url_or_path ) {
-                    continue;
-                }
-                $total_count++;
-                
-                // Check if it's a URL (CDN) - skip deletion for URLs, only remove from meta.
-                if ( AttachmentMetaHandler::is_file_url( $url_or_path ) ) {
-                    $this->logger->info( "Skipped deletion of CDN URL: {$url_or_path} (format: {$format})" );
-                    continue;
-                }
-                
-                // It's a file path, proceed with deletion.
-                if ( $wp_filesystem && $wp_filesystem->exists( $url_or_path ) && $wp_filesystem->delete( $url_or_path ) ) {
-                    $deleted_count++;
-                    $this->logger->debug( "Deleted converted file: {$url_or_path} (format: {$format})" );
-                } else {
-                    $this->logger->warning( "Failed to delete converted file: {$url_or_path} (format: {$format})" );
-                }
-            }
-        }
 
         // Clear post meta data
         AttachmentMetaHandler::delete_all( $attachment_id );
@@ -1183,273 +1069,111 @@ class WordPressProvider {
     }
 
     /**
-     * Handle attachment metadata updates to convert sizes as they're generated.
+     * Handle image downsize filter.
      *
-     * Detects when new image sizes are added to metadata and converts them to WebP/AVIF.
-     * This ensures we convert sizes as WordPress generates them during upload/regeneration.
+     * Intercepts ALL WordPress image lookups (thumbnails, medium, large, WooCommerce sizes, custom sizes, etc.).
+     * This is the most critical hook as it catches all image size requests before WordPress processes them.
      *
-     * Handles LOCAL size regeneration only (images only).
-     * Used when sizes are regenerated after initial upload (e.g., Regenerate Thumbnails plugin).
-     * Note: This does NOT handle external processing - external processing is handled by handle_update_attachment_metadata.
-     *
-     * @since 1.0.0
-     * @param array $metadata       Metadata array.
-     * @param int   $attachment_id  Attachment ID.
-     * @return array Unmodified metadata (we don't modify, just trigger conversion).
+     * @since 3.0.0
+     * @param bool|array $default      Default return value (false or array with [url, width, height]).
+     * @param int        $attachment_id Attachment ID.
+     * @param string|int[] $size      Requested image size (string name or array of dimensions).
+     * @return bool|array False if no CDN data (allows WordPress fallback), or array [url, width, height].
      */
-    public function handle_update_attachment_metadata_for_sizes( $metadata, $attachment_id ) {
-        // Check if processing should be skipped
-        if ( $this->should_skip_processing( $attachment_id ) ) {
-            return $metadata;
+    public function handle_image_downsize_filter( $default, $attachment_id, $size ) {
+        if ( ! $attachment_id ) {
+            return $default;
         }
 
-        // Only process images
-        $file_path = get_attached_file( $attachment_id );
-        if ( ! $file_path || ! $this->image_converter->is_supported_image( $file_path ) ) {
-            return $metadata;
-        }
-
-        // Check if auto-conversion is enabled
-        if ( ! Settings::is_image_auto_convert_enabled() ) {
-            return $metadata;
-        }
-
-        // Check if metadata has sizes
-        if ( ! is_array( $metadata ) || empty( $metadata['sizes'] ) ) {
-            return $metadata;
-        }
-
-        // Get existing converted files by size
-        $existing_converted = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
-        
-        // Get all image sizes (including full)
-        $image_sizes = $this->get_all_image_paths_by_size( $attachment_id );
-        
-        // Get image formats to convert
-        $image_formats = Settings::get_image_formats();
-        
-        // Get settings
-        $settings = [
-            'webp_quality' => Settings::get_webp_quality(),
-            'avif_quality' => Settings::get_avif_quality(),
-            'avif_speed' => Settings::get_avif_speed(),
-        ];
-
-        // Initialize WordPress filesystem
-        if ( ! function_exists( 'WP_Filesystem' ) ) {
-            require_once ABSPATH . 'wp-admin/includes/file.php';
-        }
-        WP_Filesystem();
-        
-        global $wp_filesystem;
-        
-        if ( ! $wp_filesystem ) {
-            return $metadata;
-        }
-
-        $converted_any = false;
-
-        // Convert each size that hasn't been converted yet
-        foreach ( $image_sizes as $size_name => $size_data ) {
-            $size_file_path = $size_data['file_path'];
-            
-            // Skip if size file doesn't exist (use WordPress filesystem)
-            if ( ! $wp_filesystem->exists( $size_file_path ) ) {
-                continue;
-            }
-            
-            // Check if this size is already converted
-            $size_converted = isset( $existing_converted[ $size_name ] ) && is_array( $existing_converted[ $size_name ] );
-            if ( $size_converted ) {
-                // Verify all formats exist using WordPress filesystem
-                $all_formats_exist = true;
-                foreach ( $image_formats as $format ) {
-                    if ( ! isset( $existing_converted[ $size_name ][ $format ] ) ) {
-                        $all_formats_exist = false;
-                        break;
-                    }
-                    
-                    // Extract URL/path from unified structure to check file existence.
-                    $data = $existing_converted[ $size_name ][ $format ];
-                    if ( ! is_array( $data ) || ! isset( $data['url'] ) ) {
-                        $all_formats_exist = false;
-                        break;
-                    }
-                    
-                    $url_or_path = $data['url'];
-                    
-                    // Check file existence (skip for CDN URLs).
-                    if ( ! empty( $url_or_path ) && ! AttachmentMetaHandler::is_file_url( $url_or_path ) && ! $wp_filesystem->exists( $url_or_path ) ) {
-                        $all_formats_exist = false;
-                        break;
-                    }
-                }
-                if ( $all_formats_exist ) {
-                    continue; // Already converted
-                }
-            }
-            
-            // Get size file info using PHP path functions
-            $size_file_path_normalized = wp_normalize_path( $size_file_path );
-            $size_file_dir = dirname( $size_file_path_normalized );
-            $size_file_info = pathinfo( $size_file_path_normalized );
-            $size_file_name = $size_file_info['filename'];
-            
-            // Create destination paths for this size
-            $destination_paths = [];
-            foreach ( $image_formats as $format ) {
-                $destination_paths[ $format ] = trailingslashit( $size_file_dir ) . $size_file_name . '.' . $format;
-            }
-            
-            // Get original file size for this specific size (for tracking)
-            $size_original_size = $wp_filesystem->size( $size_file_path );
-            
-            // Process this size
-            $results = $this->image_converter->process_image( $size_file_path, $destination_paths, $settings );
-            
-            if ( $results['success'] ) {
-                // Get existing converted files for this size or initialize
-                if ( ! isset( $existing_converted[ $size_name ] ) ) {
-                    $existing_converted[ $size_name ] = [];
-                }
-                
-                    // Store original file URL and size.
-                    // Get the original file URL for this size.
-                    $original_file_url = '';
-                    if ( 'full' === $size_name ) {
-                        $original_file_url = wp_get_attachment_url( $attachment_id );
-                    } else {
-                        // For other sizes, get the URL from metadata.
-                        $metadata = wp_get_attachment_metadata( $attachment_id );
-                        if ( ! empty( $metadata['sizes'][ $size_name ]['file'] ) ) {
-                            $upload_dir = wp_upload_dir();
-                            $file_dir = dirname( $metadata['file'] );
-                            $original_file_url = $upload_dir['baseurl'] . '/' . $file_dir . '/' . $metadata['sizes'][ $size_name ]['file'];
-                        }
-                    }
-                    
-                    if ( $size_original_size > 0 ) {
-                        // Store original file details.
-                        AttachmentMetaHandler::set_file_url_and_size( $attachment_id, 'original', $size_name, $original_file_url ?: $size_file_path, $size_original_size );
-                        
-                        // Also add to local array so it's included when we save the batch.
-                        // Convert path to URL if needed (same logic as set_file_url_and_size).
-                        $url_to_store = $original_file_url;
-                        if ( empty( $url_to_store ) ) {
-                            // Convert file path to URL.
-                            $upload_dir = wp_upload_dir();
-                            $upload_path = wp_normalize_path( $upload_dir['basedir'] );
-                            $size_file_path_normalized = wp_normalize_path( $size_file_path );
-                            if ( strpos( $size_file_path_normalized, $upload_path ) === 0 ) {
-                                $relative_path = str_replace( $upload_path, '', $size_file_path_normalized );
-                                $relative_path = ltrim( $relative_path, '/' );
-                                $url_to_store = $upload_dir['baseurl'] . '/' . $relative_path;
-                            } else {
-                                // Filter is already removed/restored above if needed, but let's be safe for full size fallback
-                                remove_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10 );
-                                $url_to_store = wp_get_attachment_url( $attachment_id );
-                                add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
-                            }
-                        }
-                        
-                        if ( $url_to_store ) {
-                            if ( ! isset( $existing_converted[ $size_name ] ) ) {
-                                $existing_converted[ $size_name ] = [];
-                            }
-                            $existing_converted[ $size_name ]['original'] = [
-                                'url' => esc_url_raw( $url_to_store ),
-                                'filesize' => $size_original_size,
-                            ];
-                        }
-                    }
-                
-                // Store converted files for this size and track conversions
-                foreach ( $results['converted_formats'] as $format ) {
-                    $converted_file_path = $results['converted_files'][ $format ] ?? '';
-                    if ( ! empty( $converted_file_path ) ) {
-                        // Track conversion: compare converted file size against original file size for this specific size
-                        $converted_size = $wp_filesystem->exists( $converted_file_path ) ? $wp_filesystem->size( $converted_file_path ) : 0;
-                        $this->conversion_tracker->record_conversion( $attachment_id, $format, $size_original_size, $converted_size, $size_name );
-                        
-                        // Store URL and size together using unified structure.
-                        AttachmentMetaHandler::set_file_url_and_size( $attachment_id, $format, $size_name, $converted_file_path, $converted_size );
-                        
-                        // Also store in local array for batch update.
-                        $existing_converted[ $size_name ][ $format ] = [
-                            'url' => $converted_file_path,
-                            'filesize' => $converted_size,
-                        ];
-                    }
-                }
-                
-                $converted_any = true;
+        // Bypass only for specific AJAX actions that need original file (image editor previews)
+        if ( is_admin() && wp_doing_ajax() ) {
+            $action = isset( $_REQUEST['action'] ) ? $_REQUEST['action'] : '';
+            if ( in_array( $action, [ 'image-editor', 'imgedit-preview' ], true ) ) {
+                return $default;
             }
         }
 
-        // Update meta if we converted any sizes
-        // Note: File sizes are already stored via set_file_url_and_size() calls above.
-        if ( $converted_any ) {
-            AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $existing_converted );
-            
-            
-            // Update formats list
-            $all_formats = [];
-            foreach ( $existing_converted as $size_files ) {
-                foreach ( array_keys( $size_files ) as $format ) {
-                    if ( ! in_array( $format, $all_formats, true ) ) {
-                        $all_formats[] = $format;
-                    }
-                }
-            }
-            if ( ! empty( $all_formats ) ) {
-                AttachmentMetaHandler::set_converted_formats( $attachment_id, $all_formats );
-                AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
-            }
-
-            // Mark as processed to prevent duplicate processing in this request
-            $this->mark_attachment_processed( $attachment_id );
+        // Get CDN meta
+        $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
+        if ( empty( $converted_files_by_size ) ) {
+            return $default; // Return false to allow WordPress fallback
         }
 
-        return $metadata;
+        // Resolve size name from WordPress size parameter
+        $size_name = $this->resolve_size_name( $size, $attachment_id );
+
+        // Check if size exists in meta, fallback to 'full' if not
+        if ( ! isset( $converted_files_by_size[ $size_name ] ) ) {
+            $size_name = 'full';
+        }
+
+        // Get converted files for the resolved size
+        $converted_files = $converted_files_by_size[ $size_name ] ?? [];
+        if ( empty( $converted_files ) ) {
+            return $default; // Return false to allow WordPress fallback
+        }
+
+        // Format priority: AVIF > WebP > original
+        $cdn_url = null;
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, Converter::FORMAT_AVIF, $size_name );
+        }
+        if ( ! $cdn_url && isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, Converter::FORMAT_WEBP, $size_name );
+        }
+        if ( ! $cdn_url && isset( $converted_files['original'] ) ) {
+            $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, 'original', $size_name );
+        }
+
+        if ( empty( $cdn_url ) ) {
+            return $default; // Return false to allow WordPress fallback
+        }
+
+        // Try to get dimensions from attachment metadata
+        $width = null;
+        $height = null;
+        $image_meta = wp_get_attachment_metadata( $attachment_id );
+        if ( ! empty( $image_meta ) ) {
+            if ( $size_name === 'full' ) {
+                $width = isset( $image_meta['width'] ) ? (int) $image_meta['width'] : null;
+                $height = isset( $image_meta['height'] ) ? (int) $image_meta['height'] : null;
+            } elseif ( isset( $image_meta['sizes'][ $size_name ] ) ) {
+                $size_data = $image_meta['sizes'][ $size_name ];
+                $width = isset( $size_data['width'] ) ? (int) $size_data['width'] : null;
+                $height = isset( $size_data['height'] ) ? (int) $size_data['height'] : null;
+            }
+        }
+
+        // Return array format: [url, width, height] or [url, null, null] if dimensions unknown
+        return [ $cdn_url, $width, $height ];
     }
-
 
     /**
      * Handle attachment URL filter.
      *
+     * Returns CDN URL for 'full' size if available. Maps to size-specific CDN URLs from meta.
+     *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use AttachmentMetaHandler for size-specific CDN URL lookup.
      * @param string $url The attachment URL.
      * @param int    $attachment_id The attachment ID.
      * @return string Modified URL.
      */
     public function handle_attachment_url_filter( $url, $attachment_id ) {
         // Always ensure we have a valid URL to return (never return null or empty)
-        if ( empty( $url ) || ! $attachment_id ) {
+        if ( ! $attachment_id ) {
             return $url;
         }
 
-        // Bypass filter in admin attachment details page to show original file
-        // Check if we're in the admin and on the upload.php page (attachment details)
-        if ( is_admin() ) {
-            // Check if we're on upload.php with item parameter (attachment details modal/page)
-            $current_screen = get_current_screen();
-            if ( $current_screen && ( $current_screen->id === 'attachment' || ( isset( $_GET['item'] ) && basename( $_SERVER['PHP_SELF'] ) === 'upload.php' ) ) ) {
-                // This is the attachment details page - return original URL
+        // Bypass only for specific AJAX actions that need original file (image editor previews)
+        if ( is_admin() && wp_doing_ajax() ) {
+            $action = isset( $_REQUEST['action'] ) ? $_REQUEST['action'] : '';
+            if ( in_array( $action, [ 'image-editor', 'imgedit-preview' ], true ) ) {
                 return $url;
-            }
-            
-            // Also bypass when WordPress is rendering attachment fields (File URL field)
-            // Check if we're in the context of attachment_fields_to_edit filter
-            $backtrace = debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 10 );
-            foreach ( $backtrace as $frame ) {
-                if ( isset( $frame['function'] ) && $frame['function'] === 'get_attachment_fields_to_edit' ) {
-                    // WordPress is getting attachment fields - return original URL
-                    return $url;
-                }
             }
         }
 
-        // Get converted files from size-specific structure
+        // Get converted files for 'full' size (wp_get_attachment_url always returns full size)
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
         $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
             ? $converted_files_by_size['full'] 
@@ -1460,96 +1184,24 @@ class WordPressProvider {
         }
 
         // Determine media type and use appropriate renderer
-        $modified_url = $url;
         if ( $this->has_video_formats( $converted_files ) ) {
-            $modified_url = $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+            return $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         } elseif ( $this->has_image_formats( $converted_files ) ) {
-            $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+            return $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
         }
 
         // Always return original URL as fallback if modified URL is empty/null
-        return ! empty( $modified_url ) ? $modified_url : $url;
-    }
-
-    /**
-     * Handle attachment image URL filter.
-     *
-     * Filters wp_get_attachment_image_url() which is commonly used by blocks/plugins
-     * to get image URLs for CSS backgrounds and other purposes.
-     *
-     * @since 1.0.2
-     * @param string|false $url         The attachment image URL or false if no image is available.
-     * @param int          $attachment_id Image attachment ID.
-     * @param string|int[] $size        Requested image size.
-     * @return string|false Modified URL or false.
-     */
-    public function handle_attachment_image_url_filter( $url, $attachment_id, $size ) {
-        // Always ensure we have a valid URL to return (never return null, false, or empty)
-        if ( ! $url || ! $attachment_id ) {
-            return $url;
-        }
-
-        // Bypass filter in admin attachment details page to show original file
-        // Check if we're in the admin and on the attachment details page
-        if ( is_admin() ) {
-            // Check for AJAX actions related to attachment details
-            if ( wp_doing_ajax() ) {
-                $action = isset( $_REQUEST['action'] ) ? $_REQUEST['action'] : '';
-                if ( in_array( $action, [ 'get-attachment', 'query-attachments', 'image-editor', 'imgedit-preview', 'send-attachment-to-editor' ], true ) ) {
-                    return $url;
-                }
-            }
-
-            global $pagenow;
-            if ( $pagenow === 'upload.php' && isset( $_GET['item'] ) ) {
-                // This is the attachment details page - return original URL
-                return $url;
-            }
-            
-            // Fallback to current screen check
-            if ( function_exists( 'get_current_screen' ) ) {
-                $current_screen = get_current_screen();
-                if ( $current_screen && $current_screen->id === 'attachment' ) {
-                    return $url;
-                }
-            }
-        }
-
-        // Get converted files (check size-specific structure first, fallback to legacy)
-        $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
-        
-        // Determine size name for lookup
-        $size_name = is_array( $size ) ? 'full' : ( $size ?: 'full' );
-        
-        $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size[ $size_name ] ) 
-            ? $converted_files_by_size[ $size_name ] 
-            : ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
-                ? $converted_files_by_size['full'] 
-                : [] );
-        
-        if ( empty( $converted_files ) ) {
-            return $url;
-        }
-
-        // Determine media type and use appropriate renderer
-        $modified_url = $url;
-        if ( $this->has_video_formats( $converted_files ) ) {
-            $modified_url = $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
-        } elseif ( $this->has_image_formats( $converted_files ) ) {
-            $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
-        }
-
-        // Always return original URL as fallback if modified URL is empty/null
-        return ! empty( $modified_url ) ? $modified_url : $url;
+        return $url;
     }
 
     /**
      * Handle attachment image src filter.
      *
-     * Filters wp_get_attachment_image_src() which returns an array with URL, width, height.
-     * This is commonly used by blocks/plugins to get image URLs for CSS backgrounds.
+     * Filters wp_get_attachment_image_src() and maps requested size to CDN URL from meta.
+     * Returns size-specific CDN URLs for attachment detail pages.
      *
      * @since 1.0.2
+     * @since 3.0.0 Updated to use AttachmentMetaHandler for size-specific CDN URL lookup and removed bypass for upload.php pages.
      * @param array|false  $image         Array of image data (url, width, height) or false if no image.
      * @param int          $attachment_id Image attachment ID.
      * @param string|int[] $size          Requested image size.
@@ -1561,29 +1213,11 @@ class WordPressProvider {
             return $image;
         }
 
-        // Bypass filter in admin attachment details page to show original file
-        // Check if we're in the admin and on the attachment details page
-        if ( is_admin() ) {
-            // Check for AJAX actions related to attachment details
-            if ( wp_doing_ajax() ) {
-                $action = isset( $_REQUEST['action'] ) ? $_REQUEST['action'] : '';
-                if ( in_array( $action, [ 'get-attachment', 'query-attachments', 'image-editor', 'imgedit-preview', 'send-attachment-to-editor' ], true ) ) {
-                    return $image;
-                }
-            }
-
-            global $pagenow;
-            if ( $pagenow === 'upload.php' && isset( $_GET['item'] ) ) {
-                // This is the attachment details page - return original image
+        // Bypass only for specific AJAX actions that need original file (image editor previews)
+        if ( is_admin() && wp_doing_ajax() ) {
+            $action = isset( $_REQUEST['action'] ) ? $_REQUEST['action'] : '';
+            if ( in_array( $action, [ 'image-editor', 'imgedit-preview' ], true ) ) {
                 return $image;
-            }
-            
-            // Fallback to current screen check
-            if ( function_exists( 'get_current_screen' ) ) {
-                $current_screen = get_current_screen();
-                if ( $current_screen && $current_screen->id === 'attachment' ) {
-                    return $image;
-                }
             }
         }
 
@@ -1593,12 +1227,11 @@ class WordPressProvider {
             return $image;
         }
 
-        // Get converted files (check size-specific structure first, fallback to legacy)
+        // Resolve size name from WordPress size parameter (handles both strings and arrays)
+        $size_name = $this->resolve_size_name( $size, $attachment_id );
+
+        // Get converted files for the requested size
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
-        
-        // Determine size name for lookup
-        $size_name = is_array( $size ) ? 'full' : ( $size ?: 'full' );
-        
         $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size[ $size_name ] ) 
             ? $converted_files_by_size[ $size_name ] 
             : ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
@@ -1609,91 +1242,87 @@ class WordPressProvider {
             return $image;
         }
 
-        // Determine media type and use appropriate renderer
-        $modified_url = $url;
-        if ( $this->has_video_formats( $converted_files ) ) {
-            $modified_url = $this->video_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
-        } elseif ( $this->has_image_formats( $converted_files ) ) {
-            $modified_url = $this->image_renderer->modify_attachment_url( $url, $attachment_id, $converted_files );
+        // Use AttachmentMetaHandler to get CDN URL for the requested size and format
+        // Priority: AVIF > WebP > original
+        $cdn_url = null;
+        if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
+            $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, Converter::FORMAT_AVIF, $size_name );
+        }
+        if ( ! $cdn_url && isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
+            $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, Converter::FORMAT_WEBP, $size_name );
+        }
+        if ( ! $cdn_url && isset( $converted_files['original'] ) ) {
+            $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, 'original', $size_name );
         }
 
-        // Update the URL in the image array if it was modified and is valid
-        // Always ensure we have a valid URL (never empty or null)
-        if ( ! empty( $modified_url ) && $modified_url !== $url ) {
-            $image[0] = $modified_url;
+        // Update the URL in the image array if CDN URL is available
+        if ( ! empty( $cdn_url ) && $cdn_url !== $url ) {
+            $image[0] = $cdn_url;
         }
 
         return $image;
     }
 
     /**
-     * Handle image srcset filter to replace URLs with converted formats.
+     * Handle image srcset filter to generate srcset from CDN meta.
      *
-     * Replaces all URLs in the srcset with their converted format equivalents,
-     * preferring AVIF over WebP, and ensuring all sizes use converted formats.
+     * Generates srcset directly from CDN meta data instead of modifying existing sources.
+     * Iterates through all sizes in meta and builds complete srcset array.
      *
      * @since 1.0.0
-     * @param array  $sources       Array of image sources.
+     * @since 3.0.0 Refactored to generate srcset directly from CDN meta instead of modifying existing sources.
+     * @param array  $sources       Array of image sources (ignored, we generate from CDN meta).
      * @param array  $size_array    Array of width and height values.
      * @param string $image_src     The 'src' of the image.
      * @param array  $image_meta    The image metadata.
      * @param int    $attachment_id Image attachment ID.
-     * @return array Modified sources array with converted format URLs.
+     * @return array|false Srcset array with CDN URLs, or false if no CDN data.
      */
     public function handle_image_srcset_filter( $sources, $size_array, $image_src, $image_meta, $attachment_id ) {
-        if ( empty( $sources ) || ! $attachment_id ) {
+        if ( ! $attachment_id ) {
             return $sources;
         }
 
-        // Get converted files by size
+        // Get CDN meta
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
         if ( empty( $converted_files_by_size ) ) {
             return $sources;
         }
 
-        // Determine preferred format (AVIF > WebP)
-        $preferred_format = null;
-        $fallback_format = null;
-        
-        // Check if we have AVIF or WebP available
-        foreach ( $converted_files_by_size as $size_formats ) {
-            if ( isset( $size_formats[ Converter::FORMAT_AVIF ] ) ) {
-                $preferred_format = Converter::FORMAT_AVIF;
-                $fallback_format = Converter::FORMAT_WEBP;
-                break;
-            } elseif ( isset( $size_formats[ Converter::FORMAT_WEBP ] ) ) {
-                $preferred_format = Converter::FORMAT_WEBP;
-                break;
+        // Format priority: AVIF > WebP > original
+        $format_priority = [ Converter::FORMAT_AVIF, Converter::FORMAT_WEBP, 'original' ];
+
+        // Build srcset array from CDN meta
+        $srcset = [];
+        foreach ( $converted_files_by_size as $size_name => $formats ) {
+            // Extract width from size name
+            $width = $this->get_width_from_size_name( $size_name, $attachment_id );
+            if ( ! $width ) {
+                continue; // Skip if we can't determine width
+            }
+
+            // Get URL with format priority
+            $cdn_url = null;
+            foreach ( $format_priority as $format ) {
+                if ( isset( $formats[ $format ] ) ) {
+                    $cdn_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, $format, $size_name );
+                    if ( $cdn_url ) {
+                        break;
+                    }
+                }
+            }
+
+            if ( $cdn_url ) {
+                $srcset[ $width ] = [
+                    'url' => $cdn_url,
+                    'descriptor' => 'w',
+                    'value' => $width,
+                ];
             }
         }
 
-        if ( ! $preferred_format ) {
-            return $sources;
-        }
-
-        // Replace each source URL with converted format
-        $modified_sources = [];
-        foreach ( $sources as $width => $source_data ) {
-            // Determine which size this source corresponds to
-            $size_name = $this->get_size_name_from_width( $width, $image_meta );
-            
-            // Get converted URL for this size and format
-            $converted_url = WordPressImageRenderer::get_image_url_from_attachment( $attachment_id, $preferred_format, $size_name );
-            
-            // Fallback to WebP if AVIF not available for this size
-            if ( ! $converted_url && $preferred_format === Converter::FORMAT_AVIF && $fallback_format ) {
-                $converted_url = WordPressImageRenderer::get_image_url_from_attachment( $attachment_id, $fallback_format, $size_name );
-            }
-            
-            // Use converted URL if available, otherwise keep original
-            if ( $converted_url ) {
-                $source_data['url'] = $converted_url;
-            }
-            
-            $modified_sources[ $width ] = $source_data;
-        }
-
-        return $modified_sources;
+        // Return srcset array if we have entries, otherwise return false for WordPress fallback
+        return ! empty( $srcset ) ? $srcset : $sources;
     }
 
     /**
@@ -1722,6 +1351,88 @@ class WordPressProvider {
         }
 
         return 'full';
+    }
+
+    /**
+     * Resolve size name from WordPress size parameter.
+     *
+     * WordPress can pass either a string (e.g., 'thumbnail') or an array (e.g., [150, 150]).
+     * This method resolves arrays to actual size names by checking attachment metadata.
+     *
+     * @since 3.0.0
+     * @param string|int[] $size          WordPress size parameter (string name or array of dimensions).
+     * @param int          $attachment_id  Attachment ID to check metadata.
+     * @return string Resolved size name ('thumbnail', 'medium', 'large', 'full', etc.).
+     */
+    private function resolve_size_name( $size, $attachment_id ) {
+        // If it's already a string, use it directly
+        if ( is_string( $size ) && ! empty( $size ) ) {
+            return $size;
+        }
+
+        // If it's an array, try to resolve it using WordPress function or metadata
+        if ( is_array( $size ) && count( $size ) >= 2 ) {
+            $width = (int) $size[0];
+            $height = isset( $size[1] ) ? (int) $size[1] : 0;
+
+            // Try WordPress function first (for registered sizes)
+            $image_meta = wp_get_attachment_metadata( $attachment_id );
+            if ( ! empty( $image_meta ) ) {
+                $resolved_name = $this->get_size_name_from_width( $width, $image_meta );
+                if ( $resolved_name !== 'full' || ( isset( $image_meta['width'] ) && (int) $image_meta['width'] === $width ) ) {
+                    return $resolved_name;
+                }
+            }
+
+            // Fallback: try to match against common WordPress sizes
+            $common_sizes = [
+                'thumbnail' => [ 150, 150 ],
+                'medium'    => [ 300, 300 ],
+                'medium_large' => [ 768, 0 ],
+                'large'     => [ 1024, 1024 ],
+            ];
+
+            foreach ( $common_sizes as $size_name => $dims ) {
+                if ( $dims[0] === $width && ( $dims[1] === 0 || $dims[1] === $height ) ) {
+                    return $size_name;
+                }
+            }
+        }
+
+        // Default to 'full' if we can't resolve
+        return 'full';
+    }
+
+    /**
+     * Get width from size name.
+     *
+     * Extracts width from size keys for srcset generation.
+     * Handles both dimension-based sizes (e.g., '1536x1536') and named sizes (e.g., 'thumbnail').
+     *
+     * @since 3.0.0
+     * @param string $size_name    Size name (e.g., 'thumbnail', 'medium', '1536x1536').
+     * @param int    $attachment_id Attachment ID to check metadata if needed.
+     * @return int|null Width in pixels, or null if not found.
+     */
+    private function get_width_from_size_name( $size_name, $attachment_id = null ) {
+        // Handle dimension-based sizes: '1536x1536' → extract width
+        if ( preg_match( '/^(\d+)x\d+$/', $size_name, $matches ) ) {
+            return (int) $matches[1];
+        }
+
+        // Fallback: Try to get from attachment metadata if attachment_id provided
+        if ( $attachment_id ) {
+            $image_meta = wp_get_attachment_metadata( $attachment_id );
+            if ( ! empty( $image_meta ) ) {
+                if ( $size_name === 'full' && isset( $image_meta['width'] ) ) {
+                    return (int) $image_meta['width'];
+                } elseif ( isset( $image_meta['sizes'][ $size_name ]['width'] ) ) {
+                    return (int) $image_meta['sizes'][ $size_name ]['width'];
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1854,10 +1565,11 @@ class WordPressProvider {
             return $html;
         }
 
+        // Resolve size name from WordPress size parameter (handles both strings and arrays)
+        $size_name = $this->resolve_size_name( $size, $attachment_id );
+
         // Get converted files (check size-specific structure first, fallback to legacy)
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
-        $size_name = is_array( $size ) ? 'full' : ( $size ?: 'full' );
-        
         $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size[ $size_name ] ) 
             ? $converted_files_by_size[ $size_name ] 
             : ( ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
@@ -1887,9 +1599,12 @@ class WordPressProvider {
     /**
      * Manually convert an attachment.
      *
-     * Images are processed synchronously, videos are enqueued for async processing.
+     * Uses service locator to route to appropriate processor (local or external).
+     * Images are processed synchronously (local) or submitted as jobs (external).
+     * Videos are enqueued for async processing.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use service locator pattern for consistent processing routing.
      * @param int $attachment_id WordPress attachment ID.
      * @return array Conversion results.
      */
@@ -1910,21 +1625,39 @@ class WordPressProvider {
             ];
         }
 
-        // Determine if it's an image or video
-        if ( $this->image_converter->is_supported_image( $file_path ) ) {
-            $this->process_image_conversion( $attachment_id, $file_path );
-            // Mark as processed to prevent duplicate processing
-            $this->mark_attachment_processed( $attachment_id );
+        if ( ! $this->service_locator ) {
+            return [
+                'success' => false,
+                'errors' => ['Service locator not available'],
+            ];
+        }
+
+        // Determine file type for response building
+        $is_image = $this->image_converter->is_supported_image( $file_path );
+        $is_video = $this->video_converter->is_supported_video( $file_path );
+
+        // Process via service locator
+        $processor = $this->service_locator->get_processor();
+        $success = $processor->process_manual_conversion( $attachment_id );
+        
+        if ( ! $success ) {
+            return [
+                'success' => false,
+                'errors' => ['Unsupported file format or processing failed'],
+            ];
+        }
+
+        // Mark as processed to prevent duplicate processing
+        $this->mark_attachment_processed( $attachment_id );
+
+        // Build response array based on file type
+        if ( $is_image ) {
             return [
                 'success' => true,
                 'type' => 'image',
                 'converted_files' => AttachmentMetaHandler::get_converted_files_for_size( $attachment_id, 'full' ),
             ];
-        } elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
-            // Enqueue video processing for async processing
-            $this->enqueue_video_processing( $attachment_id, $file_path );
-            // Mark as processed to prevent duplicate processing
-            $this->mark_attachment_processed( $attachment_id );
+        } elseif ( $is_video ) {
             return [
                 'success' => true,
                 'type' => 'video',
@@ -1932,12 +1665,15 @@ class WordPressProvider {
                 'message' => 'Video conversion has been queued for processing',
                 'converted_files' => AttachmentMetaHandler::get_converted_files_for_size( $attachment_id, 'full' ),
             ];
+        } else {
+            // For external service, other file types are also processed
+            return [
+                'success' => true,
+                'type' => 'other',
+                'queued' => true,
+                'message' => 'File processing job submitted',
+            ];
         }
-
-        return [
-            'success' => false,
-            'errors' => ['Unsupported file format'],
-        ];
     }
 
     /**
@@ -2066,6 +1802,7 @@ class WordPressProvider {
      * Processes video conversion asynchronously via WordPress cron.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use service locator pattern for consistent processing routing.
      * @param int    $attachment_id Attachment ID.
      * @param string $file_path Source file path.
      * @return void
@@ -2091,6 +1828,7 @@ class WordPressProvider {
      * Handle bulk conversion cron job.
      *
      * @since 0.1.0
+     * @since 3.0.0 Updated to use service locator pattern for consistent processing routing.
      * @return void
      */
     public function handle_bulk_conversion_cron() {
@@ -2105,10 +1843,11 @@ class WordPressProvider {
     /**
      * Handle image editor file save to reconvert edited images.
      *
-     * This runs when the WP image editor saves a file (e.g., crop/rotate/scale).
-     * Do not override core behavior; just trigger conversion and return $override.
+     * Runs when the WP image editor saves a file (e.g., crop/rotate/scale).
+     * Routes to service locator for processing without overriding core behavior.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use service locator pattern for consistent processing routing.
      * @param mixed       $override   Override value from other filters (usually null).
      * @param string      $filename   Saved filename for the edited image.
      * @param object      $image      Image editor instance.
@@ -2140,23 +1879,17 @@ class WordPressProvider {
     }
 
     /**
-     * Handle attachment metadata updates.
+     * Schedule metadata processing for later execution.
      *
-     * Critical hook that catches size generation and metadata updates.
-     * Fires AFTER sizes are generated (unlike add_attachment which fires before).
-     * Processes via service locator (handles ALL file types: images, videos, PDFs, documents, etc.).
+     * Early hook that detects metadata updates and schedules processing via shutdown hook.
+     * Necessary because wp_update_attachment_metadata can be called multiple times during upload.
      *
-     * External processing: Catches size generation and processes all sizes when they become available.
-     * Local processing: Processes images/videos.
-     *
-     * Note: $processed_attachments prevents duplicate processing during initial upload.
-     *
-     * @since 2.0.1
+     * @since 3.0.0
      * @param array $data Attachment metadata.
      * @param int   $attachment_id Attachment ID.
-     * @return array Modified metadata array.
+     * @return array Unmodified metadata.
      */
-    public function handle_update_attachment_metadata( $data, $attachment_id ) {
+    public function schedule_metadata_processing( $data, $attachment_id ) {
         // Check if processing should be skipped
         if ( $this->should_skip_processing( $attachment_id ) ) {
             return $data;
@@ -2166,27 +1899,86 @@ class WordPressProvider {
             return $data;
         }
 
-        $processor = $this->service_locator->get_processor();
-        $result = $processor->process_metadata_update( $data, $attachment_id );
+        // Register shutdown hook to process pending attachments after all metadata updates are complete.
+        // shutdown hook runs at the very end of the request, ensuring all metadata is stable.
+        // Only register once to avoid duplicate processing.
+        if ( ! has_action( 'shutdown', [ $this, 'handle_final_metadata_processing' ] ) ) {
+            add_action( 'shutdown', [ $this, 'handle_final_metadata_processing' ] );
+        }
         
-        // Mark as processed
-        $this->mark_attachment_processed( $attachment_id );
-        
-        return $result;
+        // Mark this attachment as pending processing.
+        // The actual processing will happen in handle_final_metadata_processing() during shutdown.
+        if ( ! in_array( $attachment_id, self::$pending_attachments, true ) ) {
+            self::$pending_attachments[] = $attachment_id;
+        }
+
+        return $data;
     }
+
+    /**
+     * Handle final metadata processing after all other callbacks have run.
+     *
+     * Runs during shutdown hook when metadata is stable. Handles all file types via service locator.
+     * For images: all sizes are generated. For non-images: processes immediately.
+     * Local processing uses incremental conversion; external processing submits jobs with all sizes.
+     *
+     * @since 3.0.0
+     * @return void
+     */
+    public function handle_final_metadata_processing() {
+        // If no pending attachments, nothing to process
+        if ( empty( self::$pending_attachments ) ) {
+            return;
+        }
+
+        if ( ! $this->service_locator ) {
+            return;
+        }
+
+        // Get a copy of pending attachments and clear the original
+        $pending = self::$pending_attachments;
+        self::$pending_attachments = [];
+
+        // Process each pending attachment
+        $processor = $this->service_locator->get_processor();
+        foreach ( $pending as $attachment_id ) {
+            // Check if processing should be skipped (double-check in case state changed)
+            if ( $this->should_skip_processing( $attachment_id ) ) {
+                continue;
+            }
+
+            // Process all file types via service locator with stable metadata
+            $processor->process_metadata_update(
+                wp_get_attachment_metadata( $attachment_id ), 
+                $attachment_id 
+            );
+            
+            // Mark as processed
+            $this->mark_attachment_processed( $attachment_id );
+        }
+    }
+
 
     /**
      * Handle file updates for attachments to trigger reconversion.
      *
-     * Fires when the attached file path is updated (e.g., replace media or edit creates a new file).
-     * Must return the (possibly unchanged) file path per filter contract.
+     * Routes to service locator for processing file replacements.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use service locator pattern and bail early if inside upload callback.
      * @param string $file New file path for the attachment.
      * @param int    $attachment_id Attachment ID.
      * @return string File path (unmodified).
      */
     public function handle_update_attached_file( $file, $attachment_id ) {
+        // Bail early if called within a WordPress upload callback.
+        if (
+            defined( 'DOING_AJAX' ) && DOING_AJAX && isset( $_REQUEST['action'] ) &&
+            ( $_REQUEST['action'] === 'upload-attachment' || $_REQUEST['action'] === 'async-upload' )
+        ) {
+            return $file;
+        }
+
         // Check if processing should be skipped
         if ( $this->should_skip_processing( $attachment_id ) ) {
             return $file;

@@ -177,11 +177,6 @@ class WordPressImageRenderer {
      * @return string Modified URL (always returns original URL as fallback, never null or empty).
      */
     public function modify_attachment_url( $url, $attachment_id, $converted_files ) {
-        // Always ensure we have a valid URL to return
-        if ( empty( $url ) ) {
-            return $url;
-        }
-
         if ( empty( $converted_files ) ) {
             return $url;
         }
@@ -310,7 +305,7 @@ class WordPressImageRenderer {
     /**
      * Modify featured image block content for optimized display.
      *
-     * Reuses the same conversion logic as image blocks, only differs in how attachment ID is obtained.
+     * Reuses conversion logic from image blocks, differs only in attachment ID retrieval.
      *
      * @since 1.0.0
      * @param string $block_content The block content.
@@ -359,11 +354,11 @@ class WordPressImageRenderer {
         return $block_content;
     }
 
-
     /**
      * Modify post content images for optimized display.
      *
      * @since 0.1.0
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler.
      * @param string $content Post content.
      * @return string Modified content.
      */
@@ -409,11 +404,11 @@ class WordPressImageRenderer {
         }, $content );
     }
 
-
     /**
      * Modify attachment fields for admin display.
      *
      * @since 0.1.0
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler and simplified external status display.
      * @param array   $form_fields Attachment form fields.
      * @param \WP_Post $post The attachment post object.
      * @return array Modified form fields.
@@ -426,11 +421,11 @@ class WordPressImageRenderer {
                 return $form_fields;
             }
             
-            // Get converted files (check size-specific structure first, fallback to legacy)
+            // Get converted files from size-specific structure
             $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $post->ID );
             $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
                 ? $converted_files_by_size['full'] 
-                : AttachmentMetaHandler::get_converted_files( $post->ID );
+                : [];
             $conversion_disabled = AttachmentMetaHandler::is_conversion_disabled( $post->ID );
             
             // Combine all sections under one "Flux Media Optimizer" label
@@ -486,11 +481,11 @@ class WordPressImageRenderer {
         return $form_fields;
     }
 
-
     /**
      * Create picture element for block editor images.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use size-specific structure for srcset generation.
      * @param int    $attachment_id Attachment ID.
      * @param array  $converted_files Array of converted file paths (full size only).
      * @param string $block_content Original block content.
@@ -577,6 +572,7 @@ class WordPressImageRenderer {
      * Build srcset string for a specific format across all sizes.
      *
      * @since 1.0.0
+     * @since 3.0.0 Updated to use AttachmentMetaHandler for URL retrieval.
      * @param int    $attachment_id         Attachment ID.
      * @param string $format                Format (avif or webp).
      * @param array  $converted_files_by_size Converted files organized by size.
@@ -663,31 +659,14 @@ class WordPressImageRenderer {
     }
 
     /**
-     * Get image URL from file path - the standard static method for URL generation.
+     * Get image URL from file path.
      *
-     * This is the centralized method used throughout the plugin for converting
-     * file paths to URLs. It handles various path formats and provides proper
-     * validation and error handling.
+     * Centralized method for converting file paths to URLs. Handles absolute, relative, and URL formats.
      *
      * @since 1.0.0
-     * @param string $file_path The file path to convert. Can be absolute or relative.
+     * @param string $file_path      The file path to convert. Can be absolute or relative.
      * @param bool   $validate_exists Whether to validate that the file exists. Default true.
      * @return string|null The generated URL or null if conversion fails.
-     * 
-     * @example
-     * // Convert absolute path
-     * $url = WordPressImageRenderer::get_image_url_from_file_path('/var/www/uploads/2024/01/image.webp');
-     * // Returns: 'https://example.com/wp-content/uploads/2024/01/image.webp'
-     * 
-     * @example
-     * // Convert relative path
-     * $url = WordPressImageRenderer::get_image_url_from_file_path('2024/01/image.webp');
-     * // Returns: 'https://example.com/wp-content/uploads/2024/01/image.webp'
-     * 
-     * @example
-     * // Skip file existence validation
-     * $url = WordPressImageRenderer::get_image_url_from_file_path('/path/to/file.webp', false);
-     * // Returns URL even if file doesn't exist yet
      */
     public static function get_image_url_from_file_path( $file_path, $validate_exists = true ) {
         // Validate input
@@ -763,9 +742,6 @@ class WordPressImageRenderer {
         return null;
     }
 
-
-
-
     /**
      * Extract wrapper attributes from existing block content.
      *
@@ -818,11 +794,11 @@ class WordPressImageRenderer {
         return $result;
     }
 
-
     /**
      * Get conversion status HTML for admin display.
      *
      * @since 2.0.1
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler and support CDN URLs.
      * @param int   $attachment_id Attachment ID.
      * @param array $converted_files Array of converted file paths (can be size-specific structure or legacy format).
      * @return string HTML for conversion status.
@@ -1068,19 +1044,11 @@ class WordPressImageRenderer {
     }
 
     /**
-     * Get conversion actions HTML.
-     *
-     * @since 1.0.0
-     * @param int  $attachment_id Attachment ID.
-     * @param bool $conversion_disabled Whether conversion is disabled.
-     * @return string HTML for conversion actions.
-     */
-    /**
      * Get external processing status HTML.
      *
      * @since 3.0.0
-     * @param int   $attachment_id Attachment ID.
-     * @param array $job_status    Job status data.
+     * @param int    $attachment_id Attachment ID.
+     * @param string $status        Job status string ('queued', 'processing', 'completed', 'failed').
      * @return string HTML content.
      */
     private function get_external_processing_status_html( $attachment_id, $status ) {
@@ -1114,6 +1082,15 @@ class WordPressImageRenderer {
         return $html;
     }
 
+    /**
+     * Get conversion actions HTML.
+     *
+     * @since 1.0.0
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler.
+     * @param int  $attachment_id Attachment ID.
+     * @param bool $conversion_disabled Whether conversion is disabled.
+     * @return string HTML for conversion actions.
+     */
     private function get_conversion_actions_html( $attachment_id, $conversion_disabled ) {
         try {
             $html = '<div class="flux-media-optimizer-conversion-actions" style="background: #f0f8ff; border: 1px solid #b3d9ff; border-radius: 4px; padding: 12px; margin: 10px 0;">';
@@ -1129,7 +1106,7 @@ class WordPressImageRenderer {
         $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
         $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] ) 
             ? $converted_files_by_size['full'] 
-            : AttachmentMetaHandler::get_converted_files( $attachment_id );
+            : [];
         $no_converted_files = empty( $converted_files );
         
         // Show async notice for videos with no converted files

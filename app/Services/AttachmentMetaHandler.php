@@ -28,14 +28,6 @@ class AttachmentMetaHandler {
 	const FORMAT_WEBP = 'webp';
 
 	/**
-	 * Meta key for converted files.
-	 *
-	 * @since 1.0.0
-	 * @var string
-	 */
-	const META_KEY_CONVERTED_FILES = '_flux_media_optimizer_converted_files';
-
-	/**
 	 * Meta key for converted formats.
 	 *
 	 * @since 1.0.0
@@ -93,54 +85,6 @@ class AttachmentMetaHandler {
 	 */
 	const META_KEY_CONVERTED_FILES_BY_SIZE = '_flux_media_optimizer_converted_files_by_size';
 
-	/**
-	 * Get converted files for an attachment.
-	 *
-	 * Returns legacy format structure (full size only).
-	 * Values can be file paths (local processing) or CDN URLs (external service).
-	 *
-	 * @since 1.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return array Array of format => file_path_or_url mappings, or empty array if not found.
-	 *               Example: [
-	 *                   'webp' => '/path/to/file.webp',  // or 'https://cdn.example.com/file.webp'
-	 *                   'avif' => '/path/to/file.avif',  // or 'https://cdn.example.com/file.avif'
-	 *               ]
-	 */
-	public static function get_converted_files( $attachment_id ) {
-		$files = get_post_meta( $attachment_id, self::META_KEY_CONVERTED_FILES, true );
-		return is_array( $files ) ? $files : [];
-	}
-
-	/**
-	 * Set converted files for an attachment.
-	 *
-	 * Sets legacy format structure (full size only).
-	 * Values can be file paths (local processing) or CDN URLs (external service).
-	 *
-	 * @since 1.0.0
-	 * @param int   $attachment_id Attachment ID.
-	 * @param array $files Array of format => file_path_or_url mappings.
-	 *                     Example: [
-	 *                         'webp' => '/path/to/file.webp',  // or 'https://cdn.example.com/file.webp'
-	 *                         'avif' => '/path/to/file.avif',  // or 'https://cdn.example.com/file.avif'
-	 *                     ]
-	 * @return bool|int Meta ID if the key didn't exist, true on successful update, false on failure.
-	 */
-	public static function set_converted_files( $attachment_id, $files ) {
-		return update_post_meta( $attachment_id, self::META_KEY_CONVERTED_FILES, $files );
-	}
-
-	/**
-	 * Delete converted files meta for an attachment.
-	 *
-	 * @since 1.0.0
-	 * @param int $attachment_id Attachment ID.
-	 * @return bool True on success, false on failure.
-	 */
-	public static function delete_converted_files( $attachment_id ) {
-		return delete_post_meta( $attachment_id, self::META_KEY_CONVERTED_FILES );
-	}
 
 	/**
 	 * Get converted formats for an attachment.
@@ -274,12 +218,13 @@ class AttachmentMetaHandler {
 	 * Check if attachment has any converted files.
 	 *
 	 * @since 1.0.0
+	 * @since 3.0.0 Updated to use get_converted_files_grouped_by_size() instead of legacy format.
 	 * @param int $attachment_id Attachment ID.
 	 * @return bool True if converted files exist, false otherwise.
 	 */
 	public static function has_converted_files( $attachment_id ) {
-		$files = self::get_converted_files( $attachment_id );
-		return ! empty( $files );
+		$files_by_size = self::get_converted_files_grouped_by_size( $attachment_id );
+		return ! empty( $files_by_size );
 	}
 
 	/**
@@ -425,11 +370,11 @@ class AttachmentMetaHandler {
 	 * Delete all conversion-related meta for an attachment, including size-specific data.
 	 *
 	 * @since 1.0.0
+	 * @since 3.0.0 Removed legacy delete_converted_files() call as legacy format is obsolete.
 	 * @param int $attachment_id Attachment ID.
 	 * @return void
 	 */
 	public static function delete_all( $attachment_id ) {
-		self::delete_converted_files( $attachment_id );
 		self::delete_converted_formats( $attachment_id );
 		self::delete_conversion_date( $attachment_id );
 		self::delete_converted_files_grouped_by_size( $attachment_id );
@@ -497,12 +442,6 @@ class AttachmentMetaHandler {
 	 * @return string|null URL or file path, or null if not found.
 	 */
 	public static function get_converted_file_url( $attachment_id, $format, $size = 'full' ) {
-		// Allow filtering before processing.
-		$pre_filter = apply_filters( 'flux_media_optimizer_get_converted_file_url_pre', null, $attachment_id, $format, $size );
-		if ( $pre_filter !== null ) {
-			return $pre_filter;
-		}
-
 		$converted_files_by_size = self::get_converted_files_grouped_by_size( $attachment_id );
 		
 		if ( ! empty( $converted_files_by_size ) ) {
