@@ -201,6 +201,62 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	 * @return void
 	 */
 	private function submit_processing_job( $attachment_id, $file_path ) {
+		// Determine the original file path with priority:
+		// 1. Use $file_path if it's a valid local file (first upload scenario)
+		// 2. Fall back to get_attached_file() (WordPress stored path)
+		// 3. Fall back to constructing from metadata (_wp_attached_file)
+		$original_file_path = null;
+		
+		// First, check if the passed $file_path is a valid local file.
+		// On first upload, this is the actual file that was just uploaded.
+		if ( ! empty( $file_path ) && 
+		     strpos( $file_path, 'http://' ) !== 0 && 
+		     strpos( $file_path, 'https://' ) !== 0 && 
+		     file_exists( $file_path ) ) {
+			$original_file_path = $file_path;
+		}
+		
+		// If $file_path is not valid, try get_attached_file().
+		if ( empty( $original_file_path ) ) {
+			$original_file_path = get_attached_file( $attachment_id );
+			
+			// Validate it's a local file and exists.
+			if ( ! empty( $original_file_path ) && 
+			     ( strpos( $original_file_path, 'http://' ) === 0 || strpos( $original_file_path, 'https://' ) === 0 || ! file_exists( $original_file_path ) ) ) {
+				$original_file_path = null;
+			}
+		}
+		
+		// If still empty, try constructing from metadata.
+		if ( empty( $original_file_path ) ) {
+			$upload_dir = wp_upload_dir();
+			$attached_file_meta = get_post_meta( $attachment_id, '_wp_attached_file', true );
+			
+			if ( ! empty( $attached_file_meta ) ) {
+				$constructed_path = $upload_dir['basedir'] . '/' . $attached_file_meta;
+				if ( file_exists( $constructed_path ) ) {
+					$original_file_path = $constructed_path;
+				}
+			}
+		}
+		
+		// Validate that we have a local file path, not a CDN URL.
+		if ( empty( $original_file_path ) || strpos( $original_file_path, 'http://' ) === 0 || strpos( $original_file_path, 'https://' ) === 0 ) {
+			$this->logger->error( "Cannot submit job for attachment {$attachment_id}: Invalid file path (CDN URL or empty). Passed path: {$file_path}, Resolved path: {$original_file_path}" );
+			$this->update_job_state( $attachment_id, 'failed' );
+			return;
+		}
+		
+		// Ensure the file exists locally before submitting.
+		if ( ! file_exists( $original_file_path ) ) {
+			$this->logger->error( "Cannot submit job for attachment {$attachment_id}: Original file does not exist at path: {$original_file_path}" );
+			$this->update_job_state( $attachment_id, 'failed' );
+			return;
+		}
+		
+		// Use the validated original file path for submission.
+		$file_path = $original_file_path;
+		
 		// Update state to 'queued' before submission.
 		$this->update_job_state( $attachment_id, 'queued' );
 
