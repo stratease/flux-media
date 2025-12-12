@@ -256,7 +256,7 @@ function flux_media_optimizer_activation_redirect() {
 		if ( flux_media_optimizer_is_active_for_network() ) {
 			delete_site_transient( 'flux_media_optimizer_activation_redirect' );
 		} else {
-			delete_transient( 'flux_media_optimizer_activation_redirect' );
+		delete_transient( 'flux_media_optimizer_activation_redirect' );
 		}
 		
 		// Redirect to admin page
@@ -299,7 +299,7 @@ function flux_media_optimizer_activate() {
 	if ( flux_media_optimizer_is_active_for_network() ) {
 		set_site_transient( 'flux_media_optimizer_activation_redirect', true, 60 );
 	} else {
-		set_transient( 'flux_media_optimizer_activation_redirect', true, 60 );
+	set_transient( 'flux_media_optimizer_activation_redirect', true, 60 );
 	}
 }
 
@@ -309,9 +309,9 @@ function flux_media_optimizer_activate() {
  * @since 0.1.0
  */
 function flux_media_optimizer_deactivate() {
-	// Clear scheduled events.
+	// Clear scheduled WP Cron events.
 	wp_clear_scheduled_hook( 'flux_media_optimizer_cleanup' );
-	wp_clear_scheduled_hook( 'flux_media_optimizer_bulk_conversion' );
+	// Note: Bulk conversion now uses Action Scheduler, which handles its own cleanup
 
 	// Note: We don't drop tables on deactivation to preserve data
 	// Tables will only be dropped on uninstall
@@ -381,9 +381,9 @@ function flux_media_optimizer_uninstall() {
 		}
 	}
 
-	// Clear any scheduled cron jobs.
+	// Clear any scheduled WP Cron jobs.
 	wp_clear_scheduled_hook( 'flux_media_optimizer_cleanup' );
-	wp_clear_scheduled_hook( 'flux_media_optimizer_bulk_conversion' );
+	// Note: Action Scheduler actions are automatically cleaned up by Action Scheduler
 
 	// Remove any transients.
 	$wpdb->query(

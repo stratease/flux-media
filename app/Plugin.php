@@ -29,6 +29,7 @@ use FluxMedia\App\Services\Database;
 use FluxMedia\App\Services\LicenseValidationCache;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
 use FluxMedia\App\Services\BulkConverter;
+use FluxMedia\App\Services\ActionSchedulerService;
 
 /**
  * Main plugin class that initializes all components.
@@ -115,6 +116,11 @@ class Plugin {
         );
         $service_locator->init();
         $this->wordpress_provider->set_service_locator( $service_locator );
+        
+        // Initialize Action Scheduler service
+        $action_scheduler_service = new ActionSchedulerService( $this->logger, $service_locator, $bulk_converter );
+        $action_scheduler_service->init();
+        $this->wordpress_provider->set_action_scheduler_service( $action_scheduler_service );
         
         // Initialize WordPress provider (registers hooks)
         $this->wordpress_provider->init();

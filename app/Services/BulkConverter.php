@@ -140,10 +140,11 @@ class BulkConverter {
 	 * Get unconverted media files.
 	 *
 	 * @since 0.1.0
+	 * @since 3.0.0 Made public for use by Action Scheduler service.
 	 * @param int $limit Maximum number of files to return.
 	 * @return array Array of attachment IDs.
 	 */
-	private function get_unconverted_media( $limit = 10 ) {
+	public function get_unconverted_media( $limit = 10 ) {
 		global $wpdb;
 
 		// Get image attachments that haven't been converted and aren't disabled

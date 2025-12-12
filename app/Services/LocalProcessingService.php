@@ -107,26 +107,8 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * @return array Modified metadata.
 	 */
 	public function process_metadata_update( $data, $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path ) {
-			return $data;
-		}
-		
-		$filetype = wp_check_filetype( $file_path );
-		if ( empty( $filetype['ext'] ) ) {
-			return $data;
-		}
-
-		// Process based on file type
-		if ( $this->image_converter->is_supported_image( $file_path ) ) {
-			if ( Settings::is_image_auto_convert_enabled() ) {
-				$this->wordpress_provider->process_image_conversion( $attachment_id, $file_path );
-			}
-		} elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
-			if ( Settings::is_video_auto_convert_enabled() ) {
-				$this->wordpress_provider->enqueue_video_processing( $attachment_id, $file_path );
-			}
-		}
+		// Use unified process() method
+		$this->process( $attachment_id );
 
 		return $data;
 	}
@@ -144,16 +126,9 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			return $file;
 		}
 
-		// Process based on file type
-		if ( $this->image_converter->is_supported_image( $file ) ) {
-			if ( Settings::is_image_auto_convert_enabled() ) {
-				$this->wordpress_provider->process_image_conversion( $attachment_id, $file );
-			}
-		} elseif ( $this->video_converter->is_supported_video( $file ) ) {
-			if ( Settings::is_video_auto_convert_enabled() ) {
-				$this->wordpress_provider->enqueue_video_processing( $attachment_id, $file );
-			}
-		}
+		// Use unified process() method with file path
+		// Pass file path directly since we have it and it may not be in meta yet
+		$this->process( $attachment_id, $file );
 
 		return $file;
 	}
@@ -170,18 +145,13 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * @return mixed Original $override value.
 	 */
 	public function process_image_editor_save( $override, $filename, $image, $mime_type, $post_id ) {
-		if ( empty( $post_id ) ) {
+		if ( empty( $post_id ) || ! $filename || ! wp_check_filetype( $filename )['ext'] ) {
 			return $override;
 		}
 
-		if ( ! $filename || ! wp_check_filetype( $filename )['ext'] ) {
-			return $override;
-		}
-
-		// Only process supported images
-		if ( $this->image_converter->is_supported_image( $filename ) ) {
-			$this->wordpress_provider->process_image_conversion( (int) $post_id, $filename );
-		}
+		// Use unified process() method with file path
+		// Pass file path directly since we have it and it may not be in meta yet
+		$this->process( (int) $post_id, $filename );
 
 		return $override;
 	}
@@ -241,34 +211,98 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	}
 
 	/**
-	 * Process manual conversion for an attachment.
+	 * Process attachment conversion.
 	 *
-	 * Handles manual conversion requests (e.g., from AJAX or admin actions).
-	 * For images: processes synchronously.
-	 * For videos: enqueues for async processing.
+	 * Unified method for processing attachment conversion. Handles both images and videos.
+	 * Can be used for manual conversions, Action Scheduler tasks, or internal processing.
 	 *
 	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
+	 * @param int         $attachment_id Attachment ID.
+	 * @param string|null $file_path     Optional file path. If null, will be retrieved from attachment meta.
+	 *                                   This parameter is useful when processing is triggered before the file path
+	 *                                   is stored in the attachment meta (e.g., during initial upload).
 	 * @return bool True if conversion was initiated successfully, false otherwise.
 	 */
-	public function process_manual_conversion( $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
+	public function process( $attachment_id, $file_path = null ) {
+		// Get file path if not provided
+		// Note: We retrieve from meta here because sometimes processing is triggered before
+		// the file path is stored in the attachment meta (e.g., during initial upload).
+		// When file_path is provided (e.g., from process_file_update), we use it directly.
+		if ( empty( $file_path ) ) {
+			$file_path = get_attached_file( $attachment_id );
+		}
+		
+		// Validate file path
+		if ( empty( $file_path ) || ! file_exists( $file_path ) ) {
+			$this->logger->error( "Attachment conversion failed: File not found for attachment {$attachment_id}" );
 			return false;
 		}
 
-		// Determine if it's an image or video
-		if ( $this->image_converter->is_supported_image( $file_path ) ) {
-			// Process image conversion synchronously
-			$this->wordpress_provider->process_image_conversion( $attachment_id, $file_path );
-			return true;
-		} elseif ( $this->video_converter->is_supported_video( $file_path ) ) {
-			// Enqueue video processing for async processing
-			$this->wordpress_provider->enqueue_video_processing( $attachment_id, $file_path );
-			return true;
+		// Validate file type
+		if ( ! wp_check_filetype( $file_path )['ext'] ) {
+			$this->logger->warning( "Attachment conversion skipped: Invalid file type for attachment {$attachment_id}" );
+			return false;
 		}
 
+		// Check if conversion is disabled for this attachment
+		if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
+			$this->logger->info( "Attachment conversion skipped: Conversion disabled for attachment {$attachment_id}" );
+			return false;
+		}
+
+		// Process images
+		if ( $this->image_converter->is_supported_image( $file_path ) ) {
+			return $this->process_image( $attachment_id, $file_path );
+		}
+
+		// Process videos
+		if ( $this->video_converter->is_supported_video( $file_path ) ) {
+			return $this->process_video( $attachment_id, $file_path );
+		}
+
+		// Unsupported file type
+		$this->logger->warning( "Attachment conversion skipped: Unsupported file type for attachment {$attachment_id}" );
 		return false;
+	}
+
+	/**
+	 * Process image conversion.
+	 *
+	 * @since 3.0.0
+	 * @param int    $attachment_id Attachment ID.
+	 * @param string $file_path     File path.
+	 * @return bool True if conversion was initiated successfully, false otherwise.
+	 */
+	private function process_image( $attachment_id, $file_path ) {
+		if ( ! Settings::is_image_auto_convert_enabled() ) {
+			return false;
+		}
+
+		$this->wordpress_provider->process_image_conversion( $attachment_id, $file_path );
+		return true;
+	}
+
+	/**
+	 * Process video conversion.
+	 *
+	 * @since 3.0.0
+	 * @param int    $attachment_id Attachment ID.
+	 * @param string $file_path     File path.
+	 * @return bool True if conversion was initiated successfully, false otherwise.
+	 */
+	private function process_video( $attachment_id, $file_path ) {
+		if ( ! Settings::is_video_auto_convert_enabled() ) {
+			return false;
+		}
+
+		// For videos, use enqueue for async processing (manual) or direct conversion (Action Scheduler)
+		if ( doing_action( 'flux_media_optimizer_convert_attachment' ) ) {
+			$this->wordpress_provider->process_video_conversion( $attachment_id, $file_path );
+		} else {
+			$this->wordpress_provider->enqueue_video_processing( $attachment_id, $file_path );
+		}
+
+		return true;
 	}
 }
 

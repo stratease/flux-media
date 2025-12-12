@@ -204,7 +204,12 @@ class WordPressImageRenderer {
     /**
      * Modify content images for optimized display.
      *
+     * Only used when hybrid approach is enabled. For non-hybrid mode, WordPress filters
+     * (image_downsize, wp_get_attachment_url, etc.) handle URL conversion via AttachmentMetaHandler.
+     * This method creates picture elements with multiple sources for hybrid approach.
+     *
      * @since 0.1.0
+     * @since 3.0.0 Only used when hybrid approach is enabled.
      * @param string $filtered_image The filtered image HTML.
      * @param string $context The context of the image.
      * @param int    $attachment_id The attachment ID.
@@ -353,8 +358,13 @@ class WordPressImageRenderer {
     /**
      * Modify post content images for optimized display.
      *
+     * Only used when hybrid approach is enabled. For non-hybrid mode, WordPress filters
+     * (image_downsize, wp_get_attachment_url, etc.) handle URL conversion via AttachmentMetaHandler.
+     * Block content URLs are embedded at edit time via REST API filters. This method parses HTML
+     * content at runtime for hybrid approach to create picture elements with multiple sources.
+     *
      * @since 0.1.0
-     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler.
+     * @since 3.0.0 Updated to use size-specific structure from AttachmentMetaHandler. Only used when hybrid approach is enabled.
      * @param string $content Post content.
      * @return string Modified content.
      */
@@ -386,14 +396,9 @@ class WordPressImageRenderer {
             
             // Check if we have converted formats available
             if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
-                if ( Settings::is_image_hybrid_approach_enabled() ) {
-                    // Hybrid approach: Use picture element with sources and fallback
-                    $this->enqueue_picture_css();
-                    return $this->create_picture_element( $attachment_id, $converted_files, $full_match );
-                } else {
-                    // Single format approach: Replace src with best available format
-                    return $this->replace_img_src( $full_match, $attachment_id, $converted_files );
-                }
+                // Hybrid approach: Use picture element with sources and fallback
+                $this->enqueue_picture_css();
+                return $this->create_picture_element( $attachment_id, $converted_files, $full_match );
             }
             
             return $full_match;

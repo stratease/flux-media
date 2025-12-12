@@ -68,13 +68,9 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	 * @return array Modified metadata.
 	 */
 	public function process_metadata_update( $data, $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path ) {
-			return $data;
-		}
-
-		// Submit processing job - submit_processing_job will fetch metadata which now includes sizes.
-		$this->submit_processing_job( $attachment_id, $file_path );
+		// Use unified process() method
+		// submit_processing_job (called by process()) will fetch metadata which now includes sizes.
+		$this->process( $attachment_id );
 
 		return $data;
 	}
@@ -92,7 +88,9 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 			return $file;
 		}
 
-		$this->submit_processing_job( $attachment_id, $file );
+		// Use unified process() method with file path
+		// Pass file path directly since we have it and it may not be in meta yet
+		$this->process( $attachment_id, $file );
 
 		return $file;
 	}
@@ -109,15 +107,13 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	 * @return mixed Original $override value.
 	 */
 	public function process_image_editor_save( $override, $filename, $image, $mime_type, $post_id ) {
-		if ( empty( $post_id ) ) {
+		if ( empty( $post_id ) || ! $filename || ! wp_check_filetype( $filename )['ext'] ) {
 			return $override;
 		}
 
-		if ( ! $filename || ! wp_check_filetype( $filename )['ext'] ) {
-			return $override;
-		}
-
-		$this->submit_processing_job( (int) $post_id, $filename );
+		// Use unified process() method with file path
+		// Pass file path directly since we have it and it may not be in meta yet
+		$this->process( (int) $post_id, $filename );
 
 		return $override;
 	}
@@ -151,19 +147,31 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	}
 
 	/**
-	 * Process manual conversion for an attachment.
+	 * Process attachment conversion.
 	 *
-	 * Handles manual conversion requests (e.g., from AJAX or admin actions).
-	 * Submits a processing job to the external service for all file types.
+	 * Unified method for processing attachment conversion. Submits a processing job
+	 * to the external service for all file types.
 	 *
 	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
+	 * @param int         $attachment_id Attachment ID.
+	 * @param string|null $file_path     Optional file path. If null, will be retrieved from attachment meta.
+	 *                                   This parameter is useful when processing is triggered before the file path
+	 *                                   is stored in the attachment meta (e.g., during initial upload).
 	 * @return bool True if conversion was initiated successfully, false otherwise.
 	 */
-	public function process_manual_conversion( $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path || ! wp_check_filetype( $file_path )['ext'] ) {
+	public function process( $attachment_id, $file_path = null ) {
+		// Check if conversion is disabled for this attachment
+		if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
+			$this->logger->info( "Attachment conversion skipped: Conversion disabled for attachment {$attachment_id}" );
 			return false;
+		}
+
+		// Get file path if not provided
+		// Note: We retrieve from meta here because sometimes processing is triggered before
+		// the file path is stored in the attachment meta (e.g., during initial upload).
+		// When file_path is provided (e.g., from process_file_update), we use it directly.
+		if ( empty( $file_path ) ) {
+			$file_path = get_attached_file( $attachment_id );
 		}
 
 		// Submit processing job (handles errors internally)
@@ -256,9 +264,6 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 		
 		// Use the validated original file path for submission.
 		$file_path = $original_file_path;
-		
-		// Update state to 'queued' before submission.
-		$this->update_job_state( $attachment_id, 'queued' );
 
 		// Get mimetype for file type detection.
 		$mimetype = get_post_mime_type( $attachment_id );
@@ -335,6 +340,8 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 				'key_name' => 'full',
 			];
 		}
+		// Update state to 'queued' before submission.
+		$this->update_job_state( $attachment_id, 'queued' );
 
 		// Submit job to external service.
 		$result = $this->api_client->submit_job( $attachment_id, $operations, $mimetype );

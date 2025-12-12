@@ -34,6 +34,8 @@ interface ProcessingServiceInterface {
 	/**
 	 * Process attached file update.
 	 *
+	 * Called when an attachment file is updated. Internally uses process() method.
+	 *
 	 * @since 3.0.0
 	 * @param string $file New file path for the attachment.
 	 * @param int    $attachment_id Attachment ID.
@@ -73,16 +75,18 @@ interface ProcessingServiceInterface {
 	public function process_bulk_conversion_cron();
 
 	/**
-	 * Process manual conversion for an attachment.
+	 * Process attachment conversion.
 	 *
-	 * Handles manual conversion requests (e.g., from AJAX or admin actions).
-	 * For images: processes synchronously.
-	 * For videos: enqueues for async processing.
+	 * Unified method for processing attachment conversion. Handles both images and videos.
+	 * Can be used for manual conversions, Action Scheduler tasks, or internal processing.
 	 *
 	 * @since 3.0.0
-	 * @param int $attachment_id Attachment ID.
+	 * @param int         $attachment_id Attachment ID.
+	 * @param string|null $file_path     Optional file path. If null, will be retrieved from attachment meta.
+	 *                                   This parameter is useful when processing is triggered before the file path
+	 *                                   is stored in the attachment meta (e.g., during initial upload).
 	 * @return bool True if conversion was initiated successfully, false otherwise.
 	 */
-	public function process_manual_conversion( $attachment_id );
+	public function process( $attachment_id, $file_path = null );
 }
 

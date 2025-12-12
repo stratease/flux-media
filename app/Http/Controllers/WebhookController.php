@@ -111,11 +111,7 @@ class WebhookController extends BaseController {
 		$status = ! empty( $cdn_urls ) && is_array( $cdn_urls ) ? 'completed' : 'failed';
 
 		// Update job state in post meta using AttachmentMetaHandler.
-		$state_updated = AttachmentMetaHandler::set_external_job_state( $attachment_id, $status );
-		if ( ! $state_updated ) {
-			$this->logger->error( "Failed to update job state for attachment {$attachment_id} to status: {$status}" );
-			return $this->create_error_response( 'Failed to update job state', 'state_update_failed', 500 );
-		}
+		AttachmentMetaHandler::set_external_job_state( $attachment_id, $status );
 
 		// Handle successful processing.
 		if ( $status === 'completed' ) {
@@ -154,6 +150,7 @@ class WebhookController extends BaseController {
 				AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $converted_files_by_size );
 
 				// Extract all CDN URLs for efficient lookup.
+				// Only store URLs (not local file paths) in META_KEY_CDN_URLS
 				$cdn_urls_list = [];
 				foreach ( $converted_files_by_size as $size_formats ) {
 					if ( ! is_array( $size_formats ) ) {
@@ -162,7 +159,7 @@ class WebhookController extends BaseController {
 					foreach ( $size_formats as $format_data ) {
 						if ( is_array( $format_data ) && isset( $format_data['url'] ) && is_string( $format_data['url'] ) ) {
 							// Only add CDN URLs (those starting with http:// or https://).
-							if ( strpos( $format_data['url'], 'http://' ) === 0 || strpos( $format_data['url'], 'https://' ) === 0 ) {
+							if ( AttachmentMetaHandler::is_file_url( $format_data['url'] ) ) {
 								$cdn_urls_list[] = $format_data['url'];
 							}
 						}

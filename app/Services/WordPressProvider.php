@@ -21,6 +21,7 @@ use FluxMedia\App\Services\Converter;
 use FluxMedia\App\Services\AttachmentMetaHandler;
 use FluxMedia\App\Services\GifAnimationDetector;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
+use FluxMedia\App\Services\ActionSchedulerService;
 
 /**
  * WordPress provider that handles all WordPress integration.
@@ -94,6 +95,14 @@ class WordPressProvider {
     private $service_locator;
 
     /**
+     * Action Scheduler service instance.
+     *
+     * @since 3.0.0
+     * @var ActionSchedulerService
+     */
+    private $action_scheduler_service;
+
+    /**
      * Track processed attachments per request to prevent duplicate processing.
      *
      * @since 3.0.0
@@ -133,8 +142,36 @@ class WordPressProvider {
      * @param MediaProcessingServiceLocator $service_locator Service locator instance.
      * @return void
      */
+    /**
+     * Set service locator instance.
+     *
+     * @since 3.0.0
+     * @param MediaProcessingServiceLocator $service_locator Service locator instance.
+     * @return void
+     */
     public function set_service_locator( MediaProcessingServiceLocator $service_locator ) {
         $this->service_locator = $service_locator;
+    }
+
+    /**
+     * Get service locator instance.
+     *
+     * @since 3.0.0
+     * @return MediaProcessingServiceLocator|null Service locator instance or null if not set.
+     */
+    public function get_service_locator() {
+        return $this->service_locator;
+    }
+
+    /**
+     * Set Action Scheduler service instance.
+     *
+     * @since 3.0.0
+     * @param ActionSchedulerService $action_scheduler_service Action Scheduler service instance.
+     * @return void
+     */
+    public function set_action_scheduler_service( ActionSchedulerService $action_scheduler_service ) {
+        $this->action_scheduler_service = $action_scheduler_service;
     }
 
     /**
@@ -179,19 +216,16 @@ class WordPressProvider {
         // Cron job for individual video processing
         // Detection of local vs external processing happens inside callback.
         add_action( 'flux_media_optimizer_process_video', [ $this, 'handle_process_video_cron' ], 10, 2 );
-        // Cron job for bulk conversion
+        // Bulk conversion via Action Scheduler
         // Detection of local vs external processing happens inside callback.
-        if ( Settings::is_bulk_conversion_enabled() ) {
-            add_action( 'flux_media_optimizer_bulk_conversion', [ $this, 'handle_bulk_conversion_cron' ] );
-            
-            // Schedule cron job if not already scheduled
-            if ( ! wp_next_scheduled( 'flux_media_optimizer_bulk_conversion' ) ) {
-                wp_schedule_event( time(), 'hourly', 'flux_media_optimizer_bulk_conversion' );
-            }
+        if ( Settings::is_bulk_conversion_enabled() && $this->action_scheduler_service ) {
+            // Schedule bulk discovery action (replaces WP Cron)
+            $this->action_scheduler_service->schedule_bulk_discovery( 50 );
         }
 
         // ===== RENDER IMAGE =====
-        // Image rendering hooks - all hooks are registered, hybrid approach is checked inside each callback
+        // Primary mechanism: WordPress filters (image_downsize, wp_get_attachment_url, wp_get_attachment_image_src)
+        // These filters retrieve URLs from AttachmentMetaHandler meta data (single source of truth)
         // Enable filters for frontend, REST API requests, and admin (except media library pages)
         // This ensures editor gets converted URLs when saving blocks, while avoiding confusion in media library
         if( ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ! $this->is_media_library_page() ) {
@@ -212,11 +246,12 @@ class WordPressProvider {
         add_filter( 'rest_prepare_attachment', [ $this, 'handle_rest_prepare_attachment' ], 10, 3 );
         // Filter srcset to use converted formats (prefer AVIF, fallback to WebP)
         add_filter( 'wp_calculate_image_srcset', [ $this, 'handle_image_srcset_filter' ], 10, 5 );
-        add_filter( 'wp_content_img_tag', [ $this, 'handle_content_images_filter' ], 25, 3 );
-        add_filter( 'the_content', [ $this, 'handle_post_content_images_filter' ], 20 );
-        // Only register render_block filter if hybrid approach is enabled
-        // For non-hybrid, URLs are embedded in block content when edited, so no runtime modification needed
+        // Only register HTML parsing filters when hybrid approach is enabled
+        // For non-hybrid, URLs are embedded in block content when edited and WordPress filters handle attachment URLs
+        // HTML parsing is only needed for hybrid approach to create picture elements with multiple sources
         if ( Settings::is_image_hybrid_approach_enabled() ) {
+            add_filter( 'wp_content_img_tag', [ $this, 'handle_content_images_filter' ], 25, 3 );
+            add_filter( 'the_content', [ $this, 'handle_post_content_images_filter' ], 20 );
             add_filter( 'render_block', [ $this, 'handle_render_block_filter' ], 10, 2 );
         }
         // Featured image filters
@@ -230,10 +265,9 @@ class WordPressProvider {
         // Cleanup hooks
         add_action( 'delete_attachment', [ $this, 'handle_attachment_deletion' ] );
         if ( ! Settings::is_bulk_conversion_enabled() ) {
-            // Unschedule cron job if bulk conversion is disabled
-            $timestamp = wp_next_scheduled( 'flux_media_optimizer_bulk_conversion' );
-            if ( $timestamp ) {
-                wp_unschedule_event( $timestamp, 'flux_media_optimizer_bulk_conversion' );
+            // Unschedule Action Scheduler discovery action if bulk conversion is disabled
+            if ( $this->action_scheduler_service ) {
+                $this->action_scheduler_service->unschedule_bulk_discovery();
             }
         }
     }
@@ -615,6 +649,26 @@ class WordPressProvider {
         if ( ! empty( $all_converted_files_by_size ) || $disabled_formats_removed ) {
             AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $all_converted_files_by_size );
             
+            // Extract all CDN URLs and store in dedicated meta field for efficient lookup
+            // Only store URLs (not local file paths) in META_KEY_CDN_URLS
+            $cdn_urls = [];
+            foreach ( $all_converted_files_by_size as $size_data ) {
+                if ( ! is_array( $size_data ) ) {
+                    continue;
+                }
+                foreach ( $size_data as $format => $file_data ) {
+                    if ( is_array( $file_data ) && isset( $file_data['url'] ) && is_string( $file_data['url'] ) ) {
+                        // Only add CDN URLs (those starting with http:// or https://)
+                        if ( AttachmentMetaHandler::is_file_url( $file_data['url'] ) ) {
+                            $cdn_urls[] = $file_data['url'];
+                        }
+                    }
+                }
+            }
+            // Store CDN URLs in dedicated meta field for efficient lookup
+            if ( ! empty( $cdn_urls ) ) {
+                AttachmentMetaHandler::set_cdn_urls( $attachment_id, array_unique( $cdn_urls ) );
+            }
             
             // Update formats list - only include formats that actually exist
             AttachmentMetaHandler::set_converted_formats( $attachment_id, $final_formats );
@@ -815,6 +869,27 @@ class WordPressProvider {
                 ];
             }
             AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $converted_files_by_size );
+            
+            // Extract all CDN URLs and store in dedicated meta field for efficient lookup
+            // Only store URLs (not local file paths) in META_KEY_CDN_URLS
+            $cdn_urls = [];
+            foreach ( $converted_files_by_size as $size_data ) {
+                if ( ! is_array( $size_data ) ) {
+                    continue;
+                }
+                foreach ( $size_data as $format => $file_data ) {
+                    if ( is_array( $file_data ) && isset( $file_data['url'] ) && is_string( $file_data['url'] ) ) {
+                        // Only add CDN URLs (those starting with http:// or https://)
+                        if ( AttachmentMetaHandler::is_file_url( $file_data['url'] ) ) {
+                            $cdn_urls[] = $file_data['url'];
+                        }
+                    }
+                }
+            }
+            // Store CDN URLs in dedicated meta field for efficient lookup
+            if ( ! empty( $cdn_urls ) ) {
+                AttachmentMetaHandler::set_cdn_urls( $attachment_id, array_unique( $cdn_urls ) );
+            }
 
             // Video conversion completed
         } else {
@@ -1075,8 +1150,9 @@ class WordPressProvider {
     /**
      * Handle image downsize filter.
      *
-     * Intercepts ALL WordPress image lookups (thumbnails, medium, large, WooCommerce sizes, custom sizes, etc.).
-     * This is the most critical hook as it catches all image size requests before WordPress processes them.
+     * Primary mechanism for URL conversion. Intercepts ALL WordPress image lookups (thumbnails, medium, large,
+     * WooCommerce sizes, custom sizes, etc.). This is the most critical hook as it catches all image size requests
+     * before WordPress processes them. URLs are retrieved from AttachmentMetaHandler meta data (single source of truth).
      *
      * @since 3.0.0
      * @param bool|array $default      Default return value (false or array with [url, width, height]).
@@ -1155,7 +1231,9 @@ class WordPressProvider {
     /**
      * Handle attachment URL filter.
      *
-     * Returns CDN URL for 'full' size if available. Maps to size-specific CDN URLs from meta.
+     * Primary mechanism for URL conversion. Returns CDN URL for 'full' size if available.
+     * URLs are retrieved from AttachmentMetaHandler meta data (single source of truth).
+     * This filter ensures wp_get_attachment_url() returns converted URLs when available.
      *
      * @since 1.0.0
      * @since 3.0.0 Updated to use AttachmentMetaHandler for size-specific CDN URL lookup.
@@ -1201,7 +1279,8 @@ class WordPressProvider {
     /**
      * Handle attachment image src filter.
      *
-     * Filters wp_get_attachment_image_src() and maps requested size to CDN URL from meta.
+     * Primary mechanism for URL conversion. Filters wp_get_attachment_image_src() and maps requested size
+     * to CDN URL from meta. URLs are retrieved from AttachmentMetaHandler meta data (single source of truth).
      * Returns size-specific CDN URLs for attachment detail pages.
      *
      * @since 1.0.2
@@ -1442,7 +1521,12 @@ class WordPressProvider {
     /**
      * Handle content media filter (images and videos).
      *
+     * Only registered when hybrid approach is enabled. For non-hybrid mode, WordPress filters
+     * (image_downsize, wp_get_attachment_url, etc.) handle URL conversion via AttachmentMetaHandler.
+     * This filter is used for hybrid approach to create picture elements with multiple sources.
+     *
      * @since 1.0.0
+     * @since 3.0.0 Only registered when hybrid approach is enabled.
      * @param string $filtered_media The filtered media HTML.
      * @param string $context The context of the media.
      * @param int    $attachment_id The attachment ID.
@@ -1472,7 +1556,13 @@ class WordPressProvider {
     /**
      * Handle post content media filter (images and videos).
      *
+     * Only registered when hybrid approach is enabled. For non-hybrid mode, WordPress filters
+     * (image_downsize, wp_get_attachment_url, etc.) handle URL conversion via AttachmentMetaHandler.
+     * Block content URLs are embedded at edit time via REST API filters. This filter parses HTML
+     * content at runtime for hybrid approach to create picture elements with multiple sources.
+     *
      * @since 1.0.0
+     * @since 3.0.0 Only registered when hybrid approach is enabled.
      * @param string $content Post content.
      * @return string Modified content.
      */
@@ -1642,7 +1732,7 @@ class WordPressProvider {
 
         // Process via service locator
         $processor = $this->service_locator->get_processor();
-        $success = $processor->process_manual_conversion( $attachment_id );
+        $success = $processor->process( $attachment_id );
         
         if ( ! $success ) {
             return [
@@ -1895,6 +1985,7 @@ class WordPressProvider {
      */
     public function schedule_metadata_processing( $data, $attachment_id ) {
         // Check if processing should be skipped
+
         if ( $this->should_skip_processing( $attachment_id ) ) {
             return $data;
         }
