@@ -227,19 +227,17 @@ class WordPressProvider {
         // Primary mechanism: WordPress filters (image_downsize, wp_get_attachment_url, wp_get_attachment_image_src)
         // These filters retrieve URLs from AttachmentMetaHandler meta data (single source of truth)
         // Enable filters for frontend, REST API requests, and admin (except media library pages)
-        // This ensures editor gets converted URLs when saving blocks, while avoiding confusion in media library
-        if( ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ! $this->is_media_library_page() ) {
-            // CRITICAL: image_downsize intercepts ALL WordPress image lookups (thumbnails, medium, large, WooCommerce sizes, etc.)
-            add_filter( 'image_downsize', [ $this, 'handle_image_downsize_filter' ], 10, 3 );
-            // Filter all WordPress functions that return attachment URLs
-            // These are the primary hooks that blocks/plugins use to get image URLs
-            // When blocks are saved in the editor, REST API requests these URLs, and we convert them here
-            // The converted URL is then stored in block attributes, so CSS generation gets the converted URL
-            add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
-            // Note: wp_get_attachment_image_url() doesn't have its own filter, but wp_get_attachment_image_src() does
-            // wp_get_attachment_image_url() calls wp_get_attachment_image_src() internally, so our filter on that hook will catch it
-            add_filter( 'wp_get_attachment_image_src', [ $this, 'handle_attachment_image_src_filter' ], 10, 4 );
-        }
+
+        // CRITICAL: image_downsize intercepts ALL WordPress image lookups (thumbnails, medium, large, WooCommerce sizes, etc.)
+        add_filter( 'image_downsize', [ $this, 'handle_image_downsize_filter' ], 10, 3 );
+        // Filter all WordPress functions that return attachment URLs
+        // These are the primary hooks that blocks/plugins use to get image URLs
+        // When blocks are saved in the editor, REST API requests these URLs, and we convert them here
+        // The converted URL is then stored in block attributes, so CSS generation gets the converted URL
+        add_filter( 'wp_get_attachment_url', [ $this, 'handle_attachment_url_filter' ], 10, 2 );
+        // Note: wp_get_attachment_image_url() doesn't have its own filter, but wp_get_attachment_image_src() does
+        // wp_get_attachment_image_url() calls wp_get_attachment_image_src() internally, so our filter on that hook will catch it
+        add_filter( 'wp_get_attachment_image_src', [ $this, 'handle_attachment_image_src_filter' ], 10, 4 );
         
         // Hook into REST API to modify attachment responses directly
         // This ensures block editor gets converted URLs in REST API responses
