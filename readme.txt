@@ -4,7 +4,7 @@ Tags: image optimization, video compression, webp, avif, flux plugins
 Requires at least: 6.2
 Tested up to: 6.8
 Requires PHP: 8.0
-Stable tag: 2.0.3
+Stable tag: 2.0.4
 License: GPL-2.0+
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -165,6 +165,13 @@ Yes! Flux Media Optimizer supports both static and animated GIFs. However, anima
 5. Attachment details showing optimization status and file size comparisons
 
 == Changelog ==
+
+= 2.0.0 =
+* Added animated GIF support with animation preservation
+* Automatic detection and use of Imagick for animated GIF conversion (when available)
+* Graceful fallback to GD for static GIFs and animated GIFs when Imagick is unavailable
+* Enhanced image format detection for GIF files
+* Improved processor selection logic for optimal format support
 
 = 1.0.0 =
 * Initial release
