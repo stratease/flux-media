@@ -34,12 +34,14 @@ One-click AVIF/WebP image optimization and video compression for WordPress. Auto
 - **Skeleton Loading**: Professional loading states
 - **WordPress i18n**: Full internationalization support
 
-## 💡 Pro Features (Coming Soon)
+## 💡 Optional External Services (Coming Soon)
 
-- **Unlimited cloud processing** - Offload heavy conversions to our secure cloud infrastructure
-- **Best optimizations** - Servers built with optimal image and video processing libraries to get the best results
-- **CDN integration** - Global content delivery for lightning-fast image serving
-- **Priority support** - Get help when you need it most
+All plugin features work fully without these services. These are optional enhancements for users who want to use external processing:
+
+- **Optional cloud processing** - Offload heavy conversions to secure cloud infrastructure (all processing works locally by default)
+- **Enhanced optimizations** - Optional servers with optimal image and video processing libraries
+- **CDN integration** - Optional global content delivery for image serving
+- **Priority support** - Optional support tier for external service users
 
 ## 🔒 Privacy & Data Protection
 

@@ -401,7 +401,10 @@ class Settings {
 	}
 
 	/**
-	 * Get the license key for future SaaS API authentication.
+	 * Get the license key for optional external service processing.
+	 *
+	 * License keys are optional and only used for external processing service access.
+	 * All plugin functionality works without a license key.
 	 *
 	 * Stored in flux-plugins_license_key site option for cross-plugin compatibility.
 	 *
@@ -414,7 +417,10 @@ class Settings {
 	}
 
 	/**
-	 * Set the license key for future SaaS API authentication.
+	 * Set the license key for optional external service processing.
+	 *
+	 * License keys are optional and only used for external processing service access.
+	 * All plugin functionality works without a license key.
 	 *
 	 * Stores in flux-plugins_license_key site option for cross-plugin compatibility.
 	 * Note: License activation with external service is handled by OptionsController,
