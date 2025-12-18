@@ -12,10 +12,11 @@ import { SubscribeForm, SettingsSkeleton } from '@flux-media-optimizer/component
  * Settings page component with auto-save functionality
  */
 const SettingsPage = () => {
-  // Local state for immediate UI updates
+  // Local state for immediate UI updates - completely decoupled from server state
   const [localSettings, setLocalSettings] = useState({});
   const [licenseKey, setLicenseKey] = useState('');
   const [licenseActivationError, setLicenseActivationError] = useState(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // React Query hooks for data fetching
   const { data: serverSettings, isLoading: optionsLoading, error: optionsError } = useOptions();
@@ -31,25 +32,23 @@ const SettingsPage = () => {
   // Debounce timer for license activation
   const debounceTimerRef = useRef(null);
 
-  // Update local settings when server data changes
+  // Initialize local settings ONCE from server data on first load only
+  // After initialization, local state is completely independent
   useEffect(() => {
-    if (serverSettings && typeof serverSettings === 'object') {
-      setLocalSettings(prev => ({
-        ...prev,
-        ...serverSettings,
-      }));
+    if (!isInitialized && serverSettings && typeof serverSettings === 'object' && Object.keys(serverSettings).length > 0) {
+      setLocalSettings(serverSettings);
+      setIsInitialized(true);
     }
-  }, [serverSettings]);
+  }, [serverSettings, isInitialized]);
 
-  // Update license key when license data changes (initial load only)
+  // Initialize license key ONCE from license data on first load only
   useEffect(() => {
-    if (licenseData && typeof licenseData === 'object') {
-      if (licenseData.license_key !== undefined && licenseKey === '') {
-        // Only set on initial load when field is empty
+    if (!isInitialized && licenseData && typeof licenseData === 'object') {
+      if (licenseData.license_key !== undefined) {
         setLicenseKey(licenseData.license_key || '');
       }
     }
-  }, [licenseData, licenseKey]);
+  }, [licenseData, isInitialized]);
 
   // Debounced license activation function
   const debouncedActivateLicense = useCallback((key) => {
@@ -122,20 +121,26 @@ const SettingsPage = () => {
       newValue = event.target.value;
     }
     
-    // Immediately update local state for instant UI feedback
+    // Update local state immediately for instant UI feedback
+    // This state is completely independent and won't be overwritten by server responses
     setLocalSettings(prev => ({
       ...prev,
       [key]: newValue
     }));
     
-    // Trigger auto-save with only the single field that changed
-    // This happens in the background while UI is already updated
+    // Trigger auto-save in the background
+    // The UI already reflects the change, so no waiting for server response
     debouncedSave({ [key]: newValue });
   };
 
   const handleLicenseKeyChange = (event) => {
     const newLicenseKey = event.target.value;
+    
+    // Update local state immediately for instant feedback
     setLicenseKey(newLicenseKey);
+    
+    // Clear any previous activation errors
+    setLicenseActivationError(null);
     
     // Trigger debounced activation on change
     if (newLicenseKey.trim()) {
@@ -197,9 +202,9 @@ const SettingsPage = () => {
   const hasError = optionsError || systemError;
   const errorMessage = optionsError?.message || systemError?.message || __('Failed to load settings', 'flux-media-optimizer');
   
-  // Check if data is still loading
-  const isLoading = optionsLoading || systemLoading;
-  const shouldEnableQualitySettings = !(licenseData?.license_is_valid && settings?.external_service_enabled) ;
+  // Check if data is still loading (only for initial load)
+  const isLoading = !isInitialized && (optionsLoading || systemLoading);
+  const shouldEnableQualitySettings = !(licenseData?.license_is_valid && settings?.external_service_enabled);
 
   return (
     <Box>
@@ -254,7 +259,7 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings?.bulk_conversion_enabled}
+                    checked={!!settings?.bulk_conversion_enabled}
                     disabled={isLoading}
                     onChange={handleSettingChange('bulk_conversion_enabled')}
                   />
@@ -278,7 +283,7 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings?.image_auto_convert}
+                    checked={!!settings?.image_auto_convert}
                     disabled={isLoading}
                     onChange={handleSettingChange('image_auto_convert')}
                   />
@@ -289,7 +294,7 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings?.image_hybrid_approach}
+                    checked={!!settings?.image_hybrid_approach}
                     disabled={isLoading || (!isWebPSupported() && !isAVIFSupported())}
                     onChange={handleSettingChange('image_hybrid_approach')}
                   />
@@ -305,15 +310,20 @@ const SettingsPage = () => {
                   <FormControlLabel
                     control={
                       <Switch
-                        checked={settings?.image_formats?.includes('webp')}
+                        checked={settings?.image_formats?.includes('webp') || false}
                         disabled={isLoading || !isWebPSupported()}
                         onChange={(e) => {
                           const newFormats = e.target.checked 
                             ? [...(settings?.image_formats || []).filter(f => f !== 'webp'), 'webp']
                             : (settings?.image_formats || []).filter(f => f !== 'webp');
                           
-                          // Save only the image_formats field
-                          // React Query will handle updating the cache after successful save
+                          // Update local state immediately
+                          setLocalSettings(prev => ({
+                            ...prev,
+                            image_formats: newFormats
+                          }));
+                          
+                          // Save in background
                           debouncedSave({ image_formats: newFormats });
                         }}
                       />
@@ -324,15 +334,20 @@ const SettingsPage = () => {
                   <FormControlLabel
                     control={
                       <Switch
-                        checked={settings?.image_formats?.includes('avif')}
+                        checked={settings?.image_formats?.includes('avif') || false}
                         disabled={isLoading || !isAVIFSupported()}
                         onChange={(e) => {
                           const newFormats = e.target.checked 
                             ? [...(settings?.image_formats || []).filter(f => f !== 'avif'), 'avif']
                             : (settings?.image_formats || []).filter(f => f !== 'avif');
                           
-                          // Save only the image_formats field
-                          // React Query will handle updating the cache after successful save
+                          // Update local state immediately
+                          setLocalSettings(prev => ({
+                            ...prev,
+                            image_formats: newFormats
+                          }));
+                          
+                          // Save in background
                           debouncedSave({ image_formats: newFormats });
                         }}
                       />
@@ -355,7 +370,7 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings?.video_auto_convert}
+                    checked={!!settings?.video_auto_convert}
                     disabled={isLoading}
                     onChange={handleSettingChange('video_auto_convert')}
                   />
@@ -366,7 +381,7 @@ const SettingsPage = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={settings?.video_hybrid_approach}
+                    checked={!!settings?.video_hybrid_approach}
                     disabled={isLoading}
                     onChange={handleSettingChange('video_hybrid_approach')}
                   />
@@ -382,14 +397,20 @@ const SettingsPage = () => {
                   <FormControlLabel
                     control={
                       <Switch
-                        checked={settings?.video_formats?.includes('av1')}
+                        checked={settings?.video_formats?.includes('av1') || false}
                         disabled={isLoading}
                         onChange={(e) => {
                           const newFormats = e.target.checked 
                             ? [...(settings?.video_formats || []).filter(f => f !== 'av1'), 'av1']
                             : (settings?.video_formats || []).filter(f => f !== 'av1');
                           
-                          // Save only the video_formats field
+                          // Update local state immediately
+                          setLocalSettings(prev => ({
+                            ...prev,
+                            video_formats: newFormats
+                          }));
+                          
+                          // Save in background
                           debouncedSave({ video_formats: newFormats });
                         }}
                       />
@@ -400,14 +421,20 @@ const SettingsPage = () => {
                   <FormControlLabel
                     control={
                       <Switch
-                        checked={settings?.video_formats?.includes('webm')}
+                        checked={settings?.video_formats?.includes('webm') || false}
                         disabled={isLoading}
                         onChange={(e) => {
                           const newFormats = e.target.checked 
                             ? [...(settings?.video_formats || []).filter(f => f !== 'webm'), 'webm']
                             : (settings?.video_formats || []).filter(f => f !== 'webm');
                           
-                          // Save only the video_formats field
+                          // Update local state immediately
+                          setLocalSettings(prev => ({
+                            ...prev,
+                            video_formats: newFormats
+                          }));
+                          
+                          // Save in background
                           debouncedSave({ video_formats: newFormats });
                         }}
                       />
@@ -441,7 +468,7 @@ const SettingsPage = () => {
                     type="range"
                     min="1"
                     max="100"
-                    value={settings?.image_webp_quality}
+                    value={settings?.image_webp_quality || 80}
                     disabled={isLoading || !isWebPSupported()}
                     onChange={handleSettingChange('image_webp_quality')}
                     style={{ width: '100%' }}
@@ -460,7 +487,7 @@ const SettingsPage = () => {
                     type="range"
                     min="0"
                     max="100"
-                    value={settings?.image_avif_quality}
+                    value={settings?.image_avif_quality || 70}
                     disabled={isLoading || !isAVIFSupported()}
                     onChange={handleSettingChange('image_avif_quality')}
                     style={{ width: '100%' }}
@@ -479,7 +506,7 @@ const SettingsPage = () => {
                     type="range"
                     min="0"
                     max="10"
-                    value={settings?.image_avif_speed}
+                    value={settings?.image_avif_speed || 6}
                     disabled={isLoading || !isAVIFSupported()}
                     onChange={handleSettingChange('image_avif_speed')}
                     style={{ width: '100%' }}
@@ -510,7 +537,7 @@ const SettingsPage = () => {
                     type="range"
                     min="18"
                     max="50"
-                    value={settings?.video_av1_crf}
+                    value={settings?.video_av1_crf || 28}
                     disabled={isLoading}
                     onChange={handleSettingChange('video_av1_crf')}
                     style={{ width: '100%' }}
@@ -528,7 +555,7 @@ const SettingsPage = () => {
                     type="range"
                     min="18"
                     max="50"
-                    value={settings?.video_webm_crf}
+                    value={settings?.video_webm_crf || 30}
                     disabled={isLoading}
                     onChange={handleSettingChange('video_webm_crf')}
                     style={{ width: '100%' }}
@@ -546,7 +573,7 @@ const SettingsPage = () => {
                     type="range"
                     min="0"
                     max="8"
-                    value={settings?.video_av1_cpu_used}
+                    value={settings?.video_av1_cpu_used || 4}
                     disabled={isLoading}
                     onChange={handleSettingChange('video_av1_cpu_used')}
                     style={{ width: '100%' }}
@@ -564,7 +591,7 @@ const SettingsPage = () => {
                     type="range"
                     min="0"
                     max="9"
-                    value={settings?.video_webm_speed}
+                    value={settings?.video_webm_speed || 4}
                     disabled={isLoading}
                     onChange={handleSettingChange('video_webm_speed')}
                     style={{ width: '100%' }}
