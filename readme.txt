@@ -78,9 +78,14 @@ All production dependencies are included in the plugin package and do not requir
 This plugin uses webpack to build JavaScript and CSS assets from source code.
 
 **Source Code Location:**
-* JavaScript Source: `assets/js/src/` - React components and application code
-* CSS Source: `assets/css/` (if exists) - Stylesheet source files
+* JavaScript Source: [`assets/js/src/`](https://github.com/stratease/flux-media-optimizer/tree/master/assets/js/src) - React components and application code
 * Build Output: `assets/js/dist/` - Compiled and minified production bundles
+
+**Third-Party Libraries:**
+* [React](https://react.dev/) - UI framework
+* [Material-UI (MUI)](https://mui.com/) - Component library
+* [React Router](https://reactrouter.com/) - Routing
+* [TanStack Query](https://tanstack.com/query) - Data fetching
 
 **Build Tools:**
 * Build Tool: webpack (configured in `package.json`)
@@ -96,7 +101,7 @@ To build the plugin from source:
 2. Build production assets: `npm run build`
 3. For development with hot reload: `npm run start`
 
-The source code is available in the GitHub repository: https://github.com/stratease/flux-media
+The source code is available in the GitHub repository: https://github.com/stratease/flux-media-optimizer
 
 **🎨 Works with any theme** - Flux Media Optimizer integrates seamlessly with WordPress's image system, so it works with any theme without modifications.
 
@@ -165,6 +170,15 @@ Yes! Flux Media Optimizer supports both static and animated GIFs. However, anima
 5. Attachment details showing optimization status and file size comparisons
 
 == Changelog ==
+
+= 2.0.5 =
+* Security improvements: Added comprehensive input sanitization for all settings
+* Security improvements: Fixed unescaped error messages in AJAX handlers
+* Security improvements: Fixed database query safety in uninstall function
+* Security improvements: Escaped JavaScript values in onclick handlers
+* Code quality: Refactored settings sanitization to use declarative schema approach
+* Code quality: Added REST API input validation and sanitization callbacks
+* Internationalization: All error messages are now translatable
 
 = 2.0.0 =
 * Added animated GIF support with animation preservation

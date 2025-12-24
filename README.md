@@ -2,7 +2,7 @@
 
 One-click AVIF/WebP image optimization and video compression for WordPress. Automatically convert images to modern formats and optimize videos for faster page loads.
 
-**Source Code**: [https://github.com/stratease/flux-media](https://github.com/stratease/flux-media)
+**Source Code**: [https://github.com/stratease/flux-media-optimizer](https://github.com/stratease/flux-media-optimizer)
 
 ## 🚀 Features
 
@@ -57,8 +57,14 @@ All plugin features work fully without these services. These are optional enhanc
 This plugin uses webpack to build JavaScript and CSS assets from source code.
 
 ### Source Code Location
-- **JavaScript Source**: `assets/js/src/` - React components and application code
+- **JavaScript Source**: [`assets/js/src/`](https://github.com/stratease/flux-media-optimizer/tree/master/assets/js/src) - React components and application code
 - **Build Output**: `assets/js/dist/` - Compiled and minified production bundles
+
+### Third-Party Libraries
+- [React](https://react.dev/) - UI framework
+- [Material-UI (MUI)](https://mui.com/) - Component library
+- [React Router](https://reactrouter.com/) - Routing
+- [TanStack Query](https://tanstack.com/query) - Data fetching
 
 ### Build Tools
 - **Build Tool**: webpack (configured in `package.json`)
@@ -85,7 +91,7 @@ To build the plugin from source:
    npm run start
    ```
 
-The source code is available in the GitHub repository: [https://github.com/stratease/flux-media](https://github.com/stratease/flux-media)
+The source code is available in the GitHub repository: [https://github.com/stratease/flux-media-optimizer](https://github.com/stratease/flux-media-optimizer)
 
 ## 🛠️ Quick Start
 
@@ -195,9 +201,9 @@ GPL-2.0+ - See [LICENSE](LICENSE) file for details.
 - Test with default WordPress theme
 
 ### Contact
-- **Email**: support@fluxplugins.com
+- **Email**: eddie@fluxplugins.com
 - **Website**: https://fluxplugins.com
-- **GitHub**: https://github.com/stratease/flux-media
+- **GitHub**: https://github.com/stratease/flux-media-optimizer
 
 ---
 

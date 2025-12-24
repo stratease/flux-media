@@ -42,6 +42,7 @@ class OptionsController extends BaseController {
 	 * Register REST API routes.
 	 *
 	 * @since 0.1.0
+	 * @since 2.0.5 Added sanitization and validation callbacks.
 	 */
 	public function register_routes() {
 		register_rest_route( 'flux-media-optimizer/v1', '/options', [
@@ -59,10 +60,51 @@ class OptionsController extends BaseController {
 						'required' => true,
 						'type' => 'object',
 						'description' => 'Options to update',
+						'sanitize_callback' => [ $this, 'sanitize_options' ],
+						'validate_callback' => [ $this, 'validate_options' ],
 					],
 				],
 			],
 		] );
+	}
+
+	/**
+	 * Sanitize options before validation.
+	 *
+	 * @since 2.0.5
+	 * @param array           $options Options array.
+	 * @param WP_REST_Request $request Request object.
+	 * @return array Sanitized options array.
+	 */
+	public function sanitize_options( $options, $request ) {
+		// Settings::update() will handle sanitization, but we ensure it's an array
+		if ( ! is_array( $options ) ) {
+			return [];
+		}
+		return $options;
+	}
+
+	/**
+	 * Validate options structure.
+	 *
+	 * @since 2.0.5
+	 * @param array           $options Options array.
+	 * @param WP_REST_Request $request Request object.
+	 * @return bool|WP_Error True if valid, WP_Error otherwise.
+	 */
+	public function validate_options( $options, $request ) {
+		if ( ! is_array( $options ) ) {
+			return new \WP_Error(
+				'invalid_options',
+				__( 'Options must be an object/array.', 'flux-media-optimizer' ),
+				[ 'status' => 400 ]
+			);
+		}
+
+		// Additional validation can be added here if needed
+		// Settings::update() already validates known keys and sanitizes values
+
+		return true;
 	}
 
 	/**

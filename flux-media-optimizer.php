@@ -205,7 +205,10 @@ function flux_media_optimizer_uninstall() {
 
 	// Remove post meta for all attachments.
 	$wpdb->query(
-		"DELETE FROM {$wpdb->postmeta} WHERE meta_key LIKE '_flux_media_optimizer_%'"
+		$wpdb->prepare(
+			"DELETE FROM {$wpdb->postmeta} WHERE meta_key LIKE %s",
+			$wpdb->esc_like( '_flux_media_optimizer_' ) . '%'
+		)
 	);
 
 	// Remove converted files from uploads directory using WordPress filesystem.
@@ -234,6 +237,10 @@ function flux_media_optimizer_uninstall() {
 
 	// Remove any transients.
 	$wpdb->query(
-		"DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_flux_media_optimizer_%' OR option_name LIKE '_transient_timeout_flux_media_optimizer_%'"
+		$wpdb->prepare(
+			"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+			$wpdb->esc_like( '_transient_flux_media_optimizer_' ) . '%',
+			$wpdb->esc_like( '_transient_timeout_flux_media_optimizer_' ) . '%'
+		)
 	);
 }

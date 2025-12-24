@@ -131,13 +131,20 @@ class Settings {
 	 * Set a setting value.
 	 *
 	 * @since 0.1.0
+	 * @since 2.0.5 Added input sanitization.
 	 * @param string $key Setting key.
 	 * @param mixed  $value Setting value.
 	 * @return bool True on success, false on failure.
 	 */
 	public static function set( $key, $value ) {
+		// Only allow known settings keys to prevent injection
+		$defaults = self::get_defaults();
+		if ( ! array_key_exists( $key, $defaults ) ) {
+			return false;
+		}
+		
 		$options = get_option( self::$option_name, [] );
-		$options[ $key ] = $value;
+		$options[ sanitize_key( $key ) ] = self::sanitize_setting( $key, $value );
 		return update_option( self::$option_name, $options );
 	}
 
@@ -153,15 +160,161 @@ class Settings {
 	}
 
 	/**
+	 * Get settings schema with sanitization rules.
+	 *
+	 * @since 2.0.5
+	 * @return array Settings schema array mapping keys to sanitization rules.
+	 */
+	private static function get_settings_schema() {
+		return [
+			// Integer settings with min/max ranges
+			'image_webp_quality' => [ 'type' => 'int', 'min' => 1, 'max' => 100 ],
+			'image_avif_quality' => [ 'type' => 'int', 'min' => 1, 'max' => 100 ],
+			'image_avif_speed' => [ 'type' => 'int', 'min' => 0, 'max' => 10 ],
+			'video_av1_crf' => [ 'type' => 'int', 'min' => 0, 'max' => 63 ],
+			'video_webm_crf' => [ 'type' => 'int', 'min' => 0, 'max' => 63 ],
+			'video_av1_cpu_used' => [ 'type' => 'int', 'min' => 0, 'max' => 8 ],
+			'video_webm_speed' => [ 'type' => 'int', 'min' => 0, 'max' => 9 ],
+			
+			// Boolean settings
+			'image_auto_convert' => [ 'type' => 'bool' ],
+			'video_auto_convert' => [ 'type' => 'bool' ],
+			'image_hybrid_approach' => [ 'type' => 'bool' ],
+			'video_hybrid_approach' => [ 'type' => 'bool' ],
+			'bulk_conversion_enabled' => [ 'type' => 'bool' ],
+			'enable_logging' => [ 'type' => 'bool' ],
+			
+			// String settings
+			'license_key' => [ 'type' => 'string' ],
+			
+			// Enum/whitelist settings
+			'log_level' => [
+				'type' => 'enum',
+				'options' => [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ],
+				'default' => self::DEFAULT_LOG_LEVEL,
+			],
+			
+			// Array settings with whitelist validation
+			'image_formats' => [
+				'type' => 'array',
+				'whitelist' => [ 'webp', 'avif' ],
+				'default' => self::DEFAULT_IMAGE_FORMATS,
+			],
+			'video_formats' => [
+				'type' => 'array',
+				'whitelist' => [ 'av1', 'webm' ],
+				'default' => self::DEFAULT_VIDEO_FORMATS,
+			],
+		];
+	}
+
+	/**
+	 * Sanitize a setting value based on its schema.
+	 *
+	 * @since 2.0.5
+	 * @param string $key Setting key.
+	 * @param mixed  $value Setting value to sanitize.
+	 * @return mixed Sanitized value.
+	 */
+	private static function sanitize_setting( $key, $value ) {
+		$schema = self::get_settings_schema();
+		
+		// If no schema defined, use type-based fallback
+		if ( ! isset( $schema[ $key ] ) ) {
+			return self::sanitize_by_type( $value );
+		}
+		
+		$rule = $schema[ $key ];
+		
+		switch ( $rule['type'] ) {
+			case 'int':
+				$value = absint( $value );
+				if ( isset( $rule['min'] ) && isset( $rule['max'] ) ) {
+					return max( $rule['min'], min( $rule['max'], $value ) );
+				}
+				return $value;
+				
+			case 'bool':
+				return (bool) $value;
+				
+			case 'string':
+				return sanitize_text_field( $value );
+				
+			case 'enum':
+				$value = sanitize_text_field( $value );
+				return in_array( $value, $rule['options'], true ) ? $value : ( $rule['default'] ?? '' );
+				
+			case 'array':
+				if ( ! is_array( $value ) ) {
+					return $rule['default'] ?? [];
+				}
+				$sanitized = [];
+				foreach ( $value as $item ) {
+					$item = sanitize_text_field( $item );
+					if ( isset( $rule['whitelist'] ) && in_array( $item, $rule['whitelist'], true ) ) {
+						$sanitized[] = $item;
+					}
+				}
+				return ! empty( $sanitized ) ? $sanitized : ( $rule['default'] ?? [] );
+				
+			default:
+				return self::sanitize_by_type( $value );
+		}
+	}
+
+	/**
+	 * Sanitize value by its PHP type (fallback for unknown settings).
+	 *
+	 * @since 2.0.5
+	 * @param mixed $value Value to sanitize.
+	 * @return mixed Sanitized value.
+	 */
+	private static function sanitize_by_type( $value ) {
+		if ( is_string( $value ) ) {
+			return sanitize_text_field( $value );
+		}
+		if ( is_int( $value ) ) {
+			return absint( $value );
+		}
+		if ( is_bool( $value ) ) {
+			return (bool) $value;
+		}
+		if ( is_array( $value ) ) {
+			$sanitized = [];
+			foreach ( $value as $k => $v ) {
+				$sanitized[ sanitize_key( $k ) ] = is_string( $v ) ? sanitize_text_field( $v ) : $v;
+			}
+			return $sanitized;
+		}
+		return $value;
+	}
+
+	/**
 	 * Update multiple settings.
 	 *
 	 * @since 0.1.0
+	 * @since 2.0.5 Added input sanitization.
 	 * @param array $settings Settings to update.
 	 * @return bool True on success, false on failure.
 	 */
 	public static function update( $settings ) {
+		if ( ! is_array( $settings ) ) {
+			return false;
+		}
+		
 		$current_options = get_option( self::$option_name, [] );
-		$merged_options = array_merge( $current_options, $settings );
+		$sanitized_settings = [];
+		
+		// Sanitize each setting before merging
+		foreach ( $settings as $key => $value ) {
+			// Only allow known settings keys to prevent injection
+			$defaults = self::get_defaults();
+			if ( array_key_exists( $key, $defaults ) ) {
+				$sanitized_settings[ sanitize_key( $key ) ] = self::sanitize_setting( $key, $value );
+			}
+		}
+		
+		$merged_options = array_merge( $current_options, $sanitized_settings );
 		return update_option( self::$option_name, $merged_options );
 	}
 
