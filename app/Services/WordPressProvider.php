@@ -1718,17 +1718,17 @@ class WordPressProvider {
         // Verify nonce
         $nonce = sanitize_text_field( wp_unslash( $_POST['nonce'] ?? '' ) );
         if ( ! wp_verify_nonce( $nonce, 'flux_media_optimizer_convert_attachment' ) ) {
-            wp_die( 'Security check failed' );
+            wp_die( esc_html__( 'Security check failed', 'flux-media-optimizer' ) );
         }
 
         // Check permissions
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( 'Insufficient permissions' );
+            wp_die( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
         }
 
         $attachment_id = (int) sanitize_text_field( wp_unslash( $_POST['attachment_id'] ?? 0 ) );
         if ( ! $attachment_id ) {
-            wp_send_json_error( 'Invalid attachment ID' );
+            wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
         }
 
         // Clear external job state to allow forced re-conversion
@@ -1740,7 +1740,8 @@ class WordPressProvider {
         if ( $result['success'] ) {
             wp_send_json_success( $result );
         } else {
-            wp_send_json_error( implode( ', ', $result['errors'] ?? ['Unknown error'] ) );
+            $error_message = implode( ', ', $result['errors'] ?? [ __( 'Unknown error', 'flux-media-optimizer' ) ] );
+            wp_send_json_error( esc_html( $error_message ) );
         }
     }
 
@@ -1755,17 +1756,17 @@ class WordPressProvider {
         // Verify nonce
         $nonce = sanitize_text_field( wp_unslash( $_POST['nonce'] ?? '' ) );
         if ( ! wp_verify_nonce( $nonce, 'flux_media_optimizer_disable_conversion' ) ) {
-            wp_die( 'Security check failed' );
+            wp_die( esc_html__( 'Security check failed', 'flux-media-optimizer' ) );
         }
 
         // Check permissions
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( 'Insufficient permissions' );
+            wp_die( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
         }
 
         $attachment_id = (int) sanitize_text_field( wp_unslash( $_POST['attachment_id'] ?? 0 ) );
         if ( ! $attachment_id ) {
-            wp_send_json_error( 'Invalid attachment ID' );
+            wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
         }
 
         if ( ! $this->service_locator ) {
@@ -1781,7 +1782,10 @@ class WordPressProvider {
         // (The processor's delete_attachment() clears the disabled flag, so we set it again here)
         AttachmentMetaHandler::disable_conversion( $attachment_id );
 
-        wp_send_json_success( 'Conversion disabled successfully' );
+        // Remove from conversion tracking
+        $this->conversion_tracker->delete_attachment_conversions( $attachment_id );
+
+        wp_send_json_success( esc_html__( 'Conversion disabled successfully', 'flux-media-optimizer' ) );
     }
 
     /**
@@ -1794,23 +1798,23 @@ class WordPressProvider {
         // Verify nonce
         $nonce = sanitize_text_field( wp_unslash( $_POST['nonce'] ?? '' ) );
         if ( ! wp_verify_nonce( $nonce, 'flux_media_optimizer_enable_conversion' ) ) {
-            wp_die( 'Security check failed' );
+            wp_die( esc_html__( 'Security check failed', 'flux-media-optimizer' ) );
         }
 
         // Check permissions
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( 'Insufficient permissions' );
+            wp_die( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
         }
 
         $attachment_id = (int) sanitize_text_field( wp_unslash( $_POST['attachment_id'] ?? 0 ) );
         if ( ! $attachment_id ) {
-            wp_send_json_error( 'Invalid attachment ID' );
+            wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
         }
 
         // Remove conversion disabled flag
         AttachmentMetaHandler::enable_conversion( $attachment_id );
 
-        wp_send_json_success( 'Conversion enabled successfully' );
+        wp_send_json_success( esc_html__( 'Conversion enabled successfully', 'flux-media-optimizer' ) );
     }
 
     /**

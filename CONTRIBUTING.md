@@ -118,8 +118,8 @@ The plugin includes a sophisticated GIF animation detector:
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/{your-username}/flux-media.git
-   cd flux-media
+   git clone https://github.com/{your-username}/flux-media-optimizer.git
+   cd flux-media-optimizer
    ```
 
 3. **Install dependencies**:
@@ -420,7 +420,7 @@ Any other context or screenshots about the feature request.
 
 ### Reporting Security Issues
 - **Do NOT** create public GitHub issues for security vulnerabilities
-- Email security issues to: security@fluxplugins.com
+- Email security issues to: eddie@fluxplugins.com
 - Include **detailed reproduction steps**
 - Allow **reasonable time** for response before disclosure
 
@@ -484,9 +484,9 @@ Any other context or screenshots about the feature request.
 - **Documentation** in README.md
 
 ### Contact
-- **Email**: support@fluxplugins.com
+- **Email**: eddie@fluxplugins.com
 - **Website**: https://fluxplugins.com
-- **GitHub**: https://github.com/stratease/flux-media
+- **GitHub**: https://github.com/stratease/flux-media-optimizer
 
 ## 📄 License
 

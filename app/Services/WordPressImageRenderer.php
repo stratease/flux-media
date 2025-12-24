@@ -544,12 +544,16 @@ class WordPressImageRenderer {
         }
         
         // Build picture element with proper wrapper attributes
-        $picture_html = '<picture' . ( $wrapper_attributes ? ' ' . $wrapper_attributes : '' ) . '>';
+        // Sanitize wrapper attributes to prevent XSS from unescaped HTML attributes
+        $sanitized_wrapper_attrs = $wrapper_attributes ? esc_attr( $wrapper_attributes ) : '';
+        $picture_html = '<picture' . ( $sanitized_wrapper_attrs ? ' ' . $sanitized_wrapper_attrs : '' ) . '>';
         
         // Add AVIF source with srcset if available
         if ( $preferred_format === Converter::FORMAT_AVIF || ( $preferred_format === Converter::FORMAT_WEBP && isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) ) {
             $avif_srcset = $this->build_srcset_for_format( $attachment_id, Converter::FORMAT_AVIF, $converted_files_by_size );
             if ( $avif_srcset ) {
+                // URLs in srcset are already validated with esc_url() in build_srcset_for_format(),
+                // but we still need esc_attr() for the attribute context
                 $picture_html .= '<source srcset="' . esc_attr( $avif_srcset ) . '" type="image/avif">';
             }
         }
@@ -558,6 +562,8 @@ class WordPressImageRenderer {
         if ( $preferred_format === Converter::FORMAT_WEBP || isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
             $webp_srcset = $this->build_srcset_for_format( $attachment_id, Converter::FORMAT_WEBP, $converted_files_by_size );
             if ( $webp_srcset ) {
+                // URLs in srcset are already validated with esc_url() in build_srcset_for_format(),
+                // but we still need esc_attr() for the attribute context
                 $picture_html .= '<source srcset="' . esc_attr( $webp_srcset ) . '" type="image/webp">';
             }
         }
@@ -643,13 +649,19 @@ class WordPressImageRenderer {
         // Add AVIF source if available
         if ( isset( $converted_files[ Converter::FORMAT_AVIF ] ) ) {
             $avif_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_AVIF );
-            $picture_html .= '<source srcset="' . esc_attr( $avif_url ) . '" type="image/avif">';
+            if ( $avif_url ) {
+                // Use esc_url() for URL validation and sanitization (validates/strips dangerous URL schemes)
+                $picture_html .= '<source srcset="' . esc_url( $avif_url ) . '" type="image/avif">';
+            }
         }
         
         // Add WebP source if available
         if ( isset( $converted_files[ Converter::FORMAT_WEBP ] ) ) {
             $webp_url = self::get_image_url_from_attachment( $attachment_id, Converter::FORMAT_WEBP );
-            $picture_html .= '<source srcset="' . esc_attr( $webp_url ) . '" type="image/webp">';
+            if ( $webp_url ) {
+                // Use esc_url() for URL validation and sanitization (validates/strips dangerous URL schemes)
+                $picture_html .= '<source srcset="' . esc_url( $webp_url ) . '" type="image/webp">';
+            }
         }
         
         // Add fallback img element
@@ -1117,8 +1129,8 @@ class WordPressImageRenderer {
                 '<button type="button" class="button button-primary" onclick="fluxMediaEnableConversion(%d)" style="background: #00a32a; border-color: #00a32a; color: white; padding: 6px 12px; border-radius: 3px; cursor: pointer;">
                     %s
                 </button>',
-                $attachment_id,
-                __( 'Enable Conversion', 'flux-media-optimizer' )
+                esc_js( $attachment_id ),
+                esc_html( __( 'Enable Conversion', 'flux-media-optimizer' ) )
             );
         } else {
             $html .= '<div style="display: flex; gap: 8px; flex-wrap: wrap;">';
