@@ -416,7 +416,7 @@ Any other context or screenshots about the feature request.
 
 ### Reporting Security Issues
 - **Do NOT** create public GitHub issues for security vulnerabilities
-- Email security issues to: security@fluxplugins.com
+- Email security issues to: eddie@fluxplugins.com
 - Include **detailed reproduction steps**
 - Allow **reasonable time** for response before disclosure
 

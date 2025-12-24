@@ -19,15 +19,6 @@ One-click AVIF/WebP image optimization and video compression for WordPress. Auto
 - **Size & Quality Controls**: Configure bitrate and presets to balance clarity and savings
 - **Bulk & On-Upload Support**: Convert existing library items or new uploads automatically
 
-
-### Modern Admin Interface
-- **React Router**: Hash-based routing with Link components
-- **Material-UI**: Professional design system with Grid layout
-- **React Query**: Efficient data fetching with caching
-- **Auto-Save**: Real-time settings saving with visual feedback
-- **Skeleton Loading**: Professional loading states
-- **WordPress i18n**: Full internationalization support
-
 ## 💡 Optional External Services (Coming Soon)
 
 All plugin features work fully without these services. These are optional enhancements for users who want to use external processing:
