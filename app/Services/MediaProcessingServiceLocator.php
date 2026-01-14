@@ -12,6 +12,7 @@
 namespace FluxMedia\App\Services;
 
 use FluxMedia\FluxPlugins\Common\Logger\Logger;
+use FluxMedia\FluxPlugins\Common\License\LicenseService;
 
 /**
  * Media processing service locator.
@@ -21,14 +22,6 @@ use FluxMedia\FluxPlugins\Common\Logger\Logger;
  * @since 3.0.0
  */
 class MediaProcessingServiceLocator {
-
-	/**
-	 * License validation cache instance.
-	 *
-	 * @since 3.0.0
-	 * @var LicenseValidationCache
-	 */
-	private $license_cache;
 
 	/**
 	 * Local processing service instance.
@@ -106,7 +99,7 @@ class MediaProcessingServiceLocator {
 	 * Constructor.
 	 *
 	 * @since 3.0.0
-	 * @param LicenseValidationCache $license_cache License validation cache.
+	 * @since 4.1.0 Removed LicenseValidationCache parameter - now uses common library LicenseService.
 	 * @param ImageConverter         $image_converter Image converter service.
 	 * @param VideoConverter         $video_converter Video converter service.
 	 * @param ConversionTracker      $conversion_tracker Conversion tracker service.
@@ -115,7 +108,6 @@ class MediaProcessingServiceLocator {
 	 * @param WordPressProvider       $wordpress_provider WordPress provider instance.
 	 */
 	public function __construct(
-		LicenseValidationCache $license_cache,
 		ImageConverter $image_converter,
 		VideoConverter $video_converter,
 		ConversionTracker $conversion_tracker,
@@ -123,7 +115,6 @@ class MediaProcessingServiceLocator {
 		Logger $logger,
 		WordPressProvider $wordpress_provider
 	) {
-		$this->license_cache = $license_cache;
 		$this->image_converter = $image_converter;
 		$this->video_converter = $video_converter;
 		$this->conversion_tracker = $conversion_tracker;
@@ -138,11 +129,13 @@ class MediaProcessingServiceLocator {
 	 * Initializes external provider if external service is enabled.
 	 *
 	 * @since 3.0.0
+	 * @since 4.1.0 Updated to use common library LicenseService.
 	 * @return void
 	 */
 	public function init() {
+		$license_service = LicenseService::get_instance();
 		// Initialize external provider if external service is enabled and license is valid.
-		if ( Settings::is_external_service_enabled() && $this->license_cache->is_license_valid() ) {
+		if ( Settings::is_external_service_enabled() && $license_service->is_license_valid() ) {
 			$this->external_provider = new ExternalOptimizationProvider( $this->logger );
 			$this->external_provider->init();
 		}
@@ -155,11 +148,13 @@ class MediaProcessingServiceLocator {
 	 * otherwise returns LocalProcessingService.
 	 *
 	 * @since 3.0.0
+	 * @since 4.1.0 Updated to use common library LicenseService.
 	 * @return ProcessingServiceInterface Processing service instance.
 	 */
 	public function get_processor() {
+		$license_service = LicenseService::get_instance();
 		// Check if external service is enabled and license is valid.
-		if ( Settings::is_external_service_enabled() && $this->license_cache->is_license_valid() ) {
+		if ( Settings::is_external_service_enabled() && $license_service->is_license_valid() ) {
 			return $this->get_external_service();
 		}
 

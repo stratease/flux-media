@@ -98,25 +98,6 @@ class ApiService {
     });
   }
 
-  // License endpoints
-  async getLicense() {
-    return this.request('/license');
-  }
-
-  async activateLicense(licenseKey) {
-    return this.request('/license/activate', {
-      method: 'POST',
-      body: JSON.stringify({ license_key: licenseKey }),
-    });
-  }
-
-  async validateLicense() {
-    return this.request('/license/validate', {
-      method: 'POST',
-    });
-  }
-
-
 
   // Conversion operations
   async startConversion(attachmentId, format) {

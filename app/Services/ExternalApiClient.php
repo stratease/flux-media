@@ -13,7 +13,6 @@ use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Http\Controllers\WebhookController;
 use FluxMedia\FluxPlugins\Common\Account\AccountIdService;
 use FluxMedia\FluxPlugins\Common\Api\ExternalApiClient as SharedExternalApiClient;
-use FluxMedia\FluxPlugins\Common\Compatibility\CompatibilityResponse;
 
 /**
  * Handles communication with external CDN and processing service.
@@ -66,8 +65,6 @@ class ExternalApiClient {
 	 */
 	public function submit_job( $attachment_id, $operations = [], $mimetype = '' ) {
 		// Check compatibility before making API request (plugin-specific endpoint).
-		// Compatibility checking for shared endpoints (activate_license, validate_license) is handled
-		// automatically by the shared ExternalApiClient.
 		$validator = \FluxMedia\FluxPlugins\Common\Services\CompatibilityService::get_validator();
 		if ( $validator !== null ) {
 			$validator->check_compatibility();
@@ -189,41 +186,6 @@ class ExternalApiClient {
 
 
 	/**
-	 * Activate license key with external service.
-	 *
-	 * Wrapper for shared API client's activate_license() method.
-	 *
-	 * @since 3.0.0
-	 * @since 4.0.0 Delegate to shared API client.
-	 * @param string $license_key License key to activate.
-	 * @return array Response array with 'success', 'valid', 'error', and 'message'.
-	 */
-	public function activate_license( $license_key ) {
-		// Compatibility checking is now handled automatically by the shared ExternalApiClient.
-		// Get plugin version.
-		$plugin_version = defined( 'FLUX_MEDIA_OPTIMIZER_VERSION' ) ? FLUX_MEDIA_OPTIMIZER_VERSION : '';
-
-		// Delegate to shared API client (compatibility check happens internally).
-		return $this->shared_api_client->activate_license( $license_key, $plugin_version );
-	}
-
-	/**
-	 * Validate license key with external service.
-	 *
-	 * Wrapper for shared API client's validate_license() method.
-	 *
-	 * @since 3.0.0
-	 * @since 4.0.0 Delegate to shared API client.
-	 * @param string $license_key License key to validate.
-	 * @return array Response array with 'success', 'valid', 'error', and 'message'.
-	 */
-	public function validate_license( $license_key ) {
-		// Compatibility checking is now handled automatically by the shared ExternalApiClient.
-		// Delegate to shared API client (compatibility check happens internally).
-		return $this->shared_api_client->validate_license( $license_key );
-	}
-
-	/**
 	 * Check plugin compatibility with external service.
 	 *
 	 * Wrapper for shared API client's check_compatibility() method.
@@ -232,7 +194,7 @@ class ExternalApiClient {
 	 * @since 4.0.0 Delegate to shared API client.
 	 * @param string $plugin_identifier Plugin identifier (e.g., 'flux-media-optimizer').
 	 * @param string $plugin_version   Current plugin version.
-	 * @return CompatibilityResponse|array Response object or array with 'success' and error info on failure.
+	 * @return \FluxPlugins\Common\Compatibility\CompatibilityResponse|array Response object or array with 'success' and error info on failure.
 	 */
 	public function check_compatibility( $plugin_identifier, $plugin_version ) {
 		// Delegate to shared API client.

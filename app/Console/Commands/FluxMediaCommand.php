@@ -16,7 +16,6 @@ use FluxMedia\App\Services\AttachmentMetaHandler;
 use FluxMedia\App\Services\ImageConverter;
 use FluxMedia\App\Services\VideoConverter;
 use FluxMedia\App\Services\ConversionTracker;
-use FluxMedia\App\Services\LicenseValidationCache;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
 use FluxMedia\App\Services\WordPressProvider;
 
@@ -65,11 +64,9 @@ class FluxMediaCommand extends WP_CLI_Command {
         $image_converter = new ImageConverter( $this->logger );
         $video_converter = new VideoConverter( $this->logger );
         $conversion_tracker = new ConversionTracker( $this->logger );
-        $license_cache = new LicenseValidationCache( $this->logger );
         $wordpress_provider = new WordPressProvider( $image_converter, $video_converter );
 
         $service_locator = new MediaProcessingServiceLocator(
-            $license_cache,
             $image_converter,
             $video_converter,
             $conversion_tracker,

@@ -8,6 +8,7 @@
 
 namespace FluxMedia\App\Services;
 
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Services\ImageConverter;
 use FluxMedia\App\Services\VideoConverter;
 use FluxMedia\App\Services\ConversionTracker;

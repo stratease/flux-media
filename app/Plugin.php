@@ -26,7 +26,6 @@ use FluxMedia\App\Services\ExternalOptimizationProvider;
 use FluxMedia\App\Services\ConversionTracker;
 use FluxMedia\App\Services\LogsService;
 use FluxMedia\App\Services\Database;
-use FluxMedia\App\Services\LicenseValidationCache;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
 use FluxMedia\App\Services\BulkConverter;
 use FluxMedia\App\Services\ActionSchedulerService;
@@ -110,9 +109,7 @@ class Plugin {
         
         // Initialize service locator and set it on WordPress provider
         $conversion_tracker = new ConversionTracker( $this->logger );
-        $license_cache = new LicenseValidationCache( $this->logger );
         $service_locator = new MediaProcessingServiceLocator(
-            $license_cache,
             $this->image_converter,
             $this->video_converter,
             $conversion_tracker,

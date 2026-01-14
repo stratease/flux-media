@@ -103,21 +103,12 @@ flux-media-optimizer/
 │   │   ├── ActionSchedulerService.php # Action Scheduler integration
 │   │   ├── ExternalApiClient.php # External API client wrapper
 │   │   ├── ExternalOptimizationProvider.php # External optimization provider
-│   │   ├── CompatibilityValidator.php # Compatibility validation
-│   │   ├── CompatibilityResponse.php # Compatibility response handling
-│   │   ├── CompatibilityResponseItem.php # Compatibility response item
-│   │   ├── CompatibilityNoticeHandler.php # Compatibility notice handler
-│   │   ├── Logger.php            # Logger service (legacy, see flux-plugins-common)
-│   │   ├── LoggerInterface.php   # Logger interface (legacy, see flux-plugins-common)
-│   │   ├── LogsService.php       # Logs service (legacy, see flux-plugins-common)
-│   │   ├── DatabaseHandler.php  # Database handler for logging (legacy, see flux-plugins-common)
 │   │   ├── Database.php          # Database service
 │   │   ├── Options.php           # Options management
 │   │   ├── ProcessingServiceInterface.php # Processing service interface
 │   │   ├── ProcessorDetector.php # Processor detection utilities
 │   │   ├── ProcessorTypes.php    # Processor type constants
 │   │   ├── FormatSupportDetector.php # Format support detection
-│   │   ├── LicenseValidationCache.php # License validation caching
 │   │   ├── FFmpegAutoloader.php  # FFmpeg autoloader
 │   │   ├── AV1Format.php         # AV1 format support
 │   │   ├── Converter.php         # Universal converter interface
