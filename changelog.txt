@@ -1,3 +1,6 @@
+= 4.1.1 =
+* Moved old compatibility system over to common lib.
+
 = 4.1.0 =
 * Moved logs and more infrastructure to common lib - internal prepartion for Flux Suite development.
 
