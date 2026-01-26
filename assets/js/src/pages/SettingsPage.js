@@ -71,6 +71,9 @@ const SettingsPage = () => {
   };
 
 
+  const adminUrl = window.fluxMediaAdmin?.adminUrl || '/wp-admin/';
+  const licenseUrl = `${adminUrl}admin.php?page=flux-suite-license`;
+
   // Determine if there are any errors
   const hasError = optionsError || systemError;
   const errorMessage = optionsError?.message || systemError?.message || __('Failed to load settings', 'flux-media-optimizer');
@@ -471,7 +474,9 @@ const SettingsPage = () => {
               {__('External Service Settings', 'flux-media-optimizer')}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {__('Configure external service settings. A valid license key is required. Manage your license in the License page.', 'flux-media-optimizer')}
+              {__('Configure external service settings. A valid license key is required.', 'flux-media-optimizer')}{' '}
+              {__('Manage your license in the', 'flux-media-optimizer')}{' '}
+              <Link href={licenseUrl}>{__('License page', 'flux-media-optimizer')}</Link>.
             </Typography>
             <Stack spacing={2}>
               <FormControlLabel

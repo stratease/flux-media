@@ -59,11 +59,19 @@
             "@phpstan",
             "@test"
         ],
+        "copy-common-assets": [
+            "sh -c 'if [ -d vendor/stratease/flux-plugins-common/src/assets ]; then mkdir -p src/assets/common && cp -r vendor/stratease/flux-plugins-common/src/assets/* src/assets/common/ && echo \"✅ Copied common library assets to src/assets/common/\"; else echo \"⚠️  Common library assets not found in vendor/\"; fi'"
+        ],
         "prefix-namespaces": [
+            "@copy-common-assets",
             "sh -c 'test -f ./bin/strauss.phar || curl -o bin/strauss.phar -L -C - https://github.com/BrianHenryIE/strauss/releases/latest/download/strauss.phar'",
             "@php bin/strauss.phar",
             "@composer dump-autoload",
-            "@fix-php81-deprecations"
+            "@fix-php81-deprecations",
+            "@fix-bin-wrappers"
+        ],
+        "fix-bin-wrappers": [
+            "sh -c 'if [ -f vendor-prefixed/stratease/flux-plugins-common/bin/fix-bin-wrappers.php ]; then php vendor-prefixed/stratease/flux-plugins-common/bin/fix-bin-wrappers.php; elif [ -f vendor/stratease/flux-plugins-common/bin/fix-bin-wrappers.php ]; then php vendor/stratease/flux-plugins-common/bin/fix-bin-wrappers.php; fi'"
         ],
         "fix-php81-deprecations": "php bin/fix-php81-deprecations.php",
         "post-install-cmd": [
@@ -73,7 +81,8 @@
             "@prefix-namespaces"
         ],
         "post-autoload-dump": [
-            "@php bin/strauss.phar include-autoloader"
+            "@php bin/strauss.phar include-autoloader",
+            "@fix-bin-wrappers"
         ]
     },
     "config": {

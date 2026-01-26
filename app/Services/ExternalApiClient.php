@@ -225,7 +225,7 @@ class ExternalApiClient {
 			];
 		}
 
-		$this->logger->debug( "Deleting attachment {$attachment_id} from external service for account {$account_id}" );
+		$this->logger->debug( "Deleting attachment {$attachment_id} from external service for account " . AccountIdService::get_instance()->obfuscate_account_id() );
 
 		// Use shared API client's post() method for plugin-specific endpoint.
 		$response = $this->shared_api_client->post(

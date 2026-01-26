@@ -1,3 +1,6 @@
+= 4.1.2 =
+* Updated build scripts and added link on settings page.
+
 = 4.1.1 =
 * Moved old compatibility system over to common lib.
 

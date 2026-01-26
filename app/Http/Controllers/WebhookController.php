@@ -92,7 +92,7 @@ class WebhookController extends BaseController {
 		}
 
 		if ( $request_account_id !== $stored_account_id ) {
-			$this->logger->warning( "Webhook account_id mismatch. Request: {$request_account_id}, Stored: {$stored_account_id}" );
+			$this->logger->warning( "Webhook account_id mismatch. Request: " . AccountIdService::obfuscate( $request_account_id ) . ", Stored: " . AccountIdService::obfuscate( $stored_account_id ) );
 			return $this->create_error_response( 'Invalid account_id', 'invalid_account_id', 403 );
 		}
 
