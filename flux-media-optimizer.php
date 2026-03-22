@@ -3,7 +3,7 @@
  * Plugin Name: Flux Media Optimizer by Flux Plugins
  * Plugin URI: https://fluxplugins.com/media-optimizer
  * Description: One-click image (AVIF & WebP) and video optimization for WordPress.
- * Version: 4.1.3
+ * Version: 4.1.4
  * Author: Flux Plugins
  * Author URI: https://fluxplugins.com
  * License: GPL-2.0+
@@ -12,7 +12,7 @@
  * Domain Path: /languages
  * Requires at least: 5.8
  * Tested up to: 6.9
- * Requires PHP: 8.0
+ * Requires PHP: 8.1
  *
  * Copyright 2025 Flux Plugins
  *
@@ -29,7 +29,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants.
-define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.3' );
+define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.4' );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE', __FILE__ );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -79,6 +79,7 @@ if ( version_compare( $wp_version, '5.8', '<' ) ) {
  *
  * @since 0.1.0
  * @since 3.0.0 Updated PHP version requirement from 7.4 to 8.0.
+ * @since 4.1.5 Updated PHP version requirement from 8.0 to 8.1.
  */
 function flux_media_optimizer_php_version_notice() {
 	?>
@@ -89,7 +90,7 @@ function flux_media_optimizer_php_version_notice() {
 				/* translators: 1: Current PHP version, 2: Required PHP version */
 				esc_html__( 'Flux Media Optimizer requires PHP %2$s or higher. You are running PHP %1$s.', 'flux-media-optimizer' ),
 				PHP_VERSION,
-				'8.0'
+				'8.1'
 			);
 			?>
 		</p>
