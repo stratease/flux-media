@@ -144,6 +144,7 @@ class AdminController {
 		$is_debug = defined( 'WP_DEBUG' ) && WP_DEBUG && defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG;
 		?>
 		<div class="wrap">
+			<span class="wp-header-end"></span>
 			<div id="flux-media-optimizer-app">
 			<?php if ( $is_debug ) : ?>
 				<div class="notice notice-warning" style="margin: 20px 0; padding: 15px;">
