@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Flux Media Optimizer by Flux Plugins
+ * Plugin Name: Flux Media Optimizer – Image & Video Optimization by Flux Plugins
  * Plugin URI: https://fluxplugins.com/media-optimizer
  * Description: One-click image (AVIF & WebP) and video optimization for WordPress.
- * Version: 4.1.4
+ * Version: 4.1.5
  * Author: Flux Plugins
  * Author URI: https://fluxplugins.com
  * License: GPL-2.0+
@@ -29,7 +29,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants.
-define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.4' );
+define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.5' );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE', __FILE__ );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -61,7 +61,8 @@ if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_API_NAMESPACE' ) ) {
 
 // Check PHP version compatibility.
 // @since 3.0.0 Updated PHP version requirement from 7.4 to 8.0.
-if ( version_compare( PHP_VERSION, '8.0', '<' ) ) {
+// @since 4.1.5 Updated PHP version requirement from 8.0 to 8.1.
+if ( version_compare( PHP_VERSION, '8.1', '<' ) ) {
 	add_action( 'admin_notices', 'flux_media_optimizer_php_version_notice' );
 	return;
 }
@@ -286,11 +287,12 @@ register_uninstall_hook( __FILE__, 'flux_media_optimizer_uninstall' );
  *
  * @since 0.1.0
  * @since 3.0.0 Added requirements check before activation and multisite support for activation redirect.
+ * @since 4.1.5 Updated PHP version requirement check from 8.0 to 8.1.
  */
 function flux_media_optimizer_activate() {
 	// Check requirements before activation.
 	global $wp_version;
-	if ( version_compare( PHP_VERSION, '8.0', '<' ) || version_compare( $wp_version, '5.8', '<' ) ) {
+	if ( version_compare( PHP_VERSION, '8.1', '<' ) || version_compare( $wp_version, '5.8', '<' ) ) {
 		return;
 	}
 

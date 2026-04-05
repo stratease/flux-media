@@ -1,6 +1,6 @@
-# Contributing to Flux Media Optimizer by Flux Plugins
+# Contributing to Flux Media Optimizer – Image & Video Optimization by Flux Plugins
 
-Thank you for your interest in contributing to Flux Media Optimizer by Flux Plugins! This document provides comprehensive guidelines and information for contributors, including detailed architecture documentation and coding standards.
+Thank you for your interest in contributing to Flux Media Optimizer – Image & Video Optimization by Flux Plugins! This document provides comprehensive guidelines and information for contributors, including detailed architecture documentation and coding standards.
 
 ## 📋 Source Code
 
@@ -104,7 +104,6 @@ flux-media-optimizer/
 │   │   ├── ExternalApiClient.php # External API client wrapper
 │   │   ├── ExternalOptimizationProvider.php # External optimization provider
 │   │   ├── Database.php          # Database service
-│   │   ├── Options.php           # Options management
 │   │   ├── ProcessingServiceInterface.php # Processing service interface
 │   │   ├── ProcessorDetector.php # Processor detection utilities
 │   │   ├── ProcessorTypes.php    # Processor type constants

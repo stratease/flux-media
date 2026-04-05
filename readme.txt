@@ -1,18 +1,20 @@
-=== Flux Media Optimizer by Flux Plugins ===
+=== Flux Media Optimizer – Image & Video Optimization by Flux Plugins ===
 Contributors: edaniels
 Tags: media optimizer, video compression, webp, avif, cdn
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 8.1
-Stable tag: 4.1.4
+Stable tag: 4.1.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Automatically optimize images, compress videos, and deliver media via global CDN. Boost Core Web Vitals and SEO with 50-70% smaller file sizes.
+Automatically optimize images, compress videos and deliver media via global CDN. Boost Core Web Vitals and SEO with 50-70% smaller file sizes.
 
 == Description ==
 
 ### The Complete Media Performance Solution for WordPress
+
+Automatically reduce image and video sizes by up to 70% and improve Core Web Vitals — no setup required.
 
 Flux Media Optimizer is the all-in-one media optimizer plugin for WordPress – optimize images, compress videos, and deliver everything through a global CDN for lightning-fast page loads worldwide.
 
@@ -121,14 +123,15 @@ Flux Media Optimizer supports video optimization with FFmpeg. You can convert vi
 
 == Changelog ==
 
+= 4.1.5 =
+* Guard against php 8.0 - we support php 8.1>.
+* Removed some unused code and minor cleanup.
+
 = 4.1.4 =
 * Updating dependency to be compatible with php 8.
 
 = 4.1.2 =
 * Updated build scripts and added link on settings page.
-
-= 4.1.1 =
-* Moved old compatibility system over to common lib.
 
 
 == Upgrade Notice ==

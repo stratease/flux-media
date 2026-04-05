@@ -8,10 +8,9 @@
 
 namespace FluxMedia\App\Services;
 
-use FluxMedia\FluxPlugins\Common\Logger\Logger;
-use FluxMedia\App\Http\Controllers\WebhookController;
-use FluxMedia\App\Services\ConversionTracker;
 use FluxMedia\App\Services\AttachmentMetaHandler;
+use FluxMedia\App\Services\Settings;
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 
 /**
  * Handles external service integration for CDN and remote processing.
@@ -122,6 +121,7 @@ class ExternalOptimizationProvider {
 	 *
 	 * @since 3.0.0
 	 * @since 3.0.0 Updated to use AttachmentMetaHandler instead of external_jobs table. Retry count tracking removed.
+	 * @since 4.1.5 Rebuild operations from Settings and attachment metadata (aligned with ExternalProcessingService); fixed undefined job payload.
 	 * @param int $attachment_id Attachment ID.
 	 * @return bool True on success, false on failure.
 	 */
@@ -134,73 +134,63 @@ class ExternalOptimizationProvider {
 		// Note: Retry count tracking removed - meta-based system doesn't track retry counts.
 		// If retry count tracking is needed in the future, it can be added as separate meta.
 
-		// Rebuild operations array from stored formats and sizes.
 		$file_path = get_attached_file( $attachment_id );
 		if ( ! $file_path ) {
 			return false;
 		}
 
-		// Determine file type.
-		$image_converter = new ImageConverter( $this->logger );
-		$video_converter = new VideoConverter( $this->logger );
-
-		$is_image = $image_converter->is_supported_image( $file_path );
-		$is_video = $video_converter->is_supported_video( $file_path );
-
-		if ( ! $is_image && ! $is_video ) {
-			return false;
-		}
-
-		// Get webhook URL and mimetype.
 		$mimetype = get_post_mime_type( $attachment_id );
 		if ( ! $mimetype ) {
 			$mimetype = wp_check_filetype( $file_path )['type'] ?? '';
 		}
 
-		// Rebuild operations array.
+		$is_image = ! empty( $mimetype ) && strpos( $mimetype, 'image/' ) === 0;
+		$is_video = ! empty( $mimetype ) && strpos( $mimetype, 'video/' ) === 0;
+
+		if ( ! $is_image && ! $is_video ) {
+			return false;
+		}
+
+		$formats = [];
+		if ( $is_image ) {
+			$formats = Settings::get_image_formats();
+		} elseif ( $is_video ) {
+			$formats = Settings::get_video_formats();
+		}
+
 		$operations = [];
-		$formats = $job['formats'] ?? [];
 
 		if ( $is_image ) {
 			$metadata = wp_get_attachment_metadata( $attachment_id );
-			
-			// Always include full size operation.
+
 			$full_operation = [
 				'formats'  => $formats,
 				'key_name' => 'full',
 			];
-			
-			// Add resize dimensions for full size if available.
+
 			if ( isset( $metadata['width'] ) && isset( $metadata['height'] ) ) {
 				$full_operation['resize'] = [
 					'width'  => (int) $metadata['width'],
 					'height' => (int) $metadata['height'],
 				];
 			}
-			
+
 			$operations[] = $full_operation;
-			
-			// Add operations for each stored size.
-			$sizes = $job['sizes'] ?? [];
+
 			if ( ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
-				foreach ( $sizes as $size_name ) {
-					if ( 'full' === $size_name ) {
-						continue; // Already added.
-					}
-					
+				foreach ( $metadata['sizes'] as $size_name => $size_data ) {
 					$operation = [
 						'formats'  => $formats,
 						'key_name' => $size_name,
 					];
-					
-					// Add resize dimensions if available.
-					if ( isset( $metadata['sizes'][ $size_name ]['width'] ) && isset( $metadata['sizes'][ $size_name ]['height'] ) ) {
+
+					if ( isset( $size_data['width'] ) && isset( $size_data['height'] ) ) {
 						$operation['resize'] = [
-							'width'  => (int) $metadata['sizes'][ $size_name ]['width'],
-							'height' => (int) $metadata['sizes'][ $size_name ]['height'],
+							'width'  => (int) $size_data['width'],
+							'height' => (int) $size_data['height'],
 						];
 					}
-					
+
 					$operations[] = $operation;
 				}
 			}
