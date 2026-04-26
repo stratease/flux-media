@@ -9,7 +9,11 @@
     "start": "webpack serve --mode=development",
     "lint": "eslint src/ --ext .js",
     "lint:fix": "eslint src/ --ext .js --fix",
-    "lint:js": "eslint src/ --ext .js"
+    "lint:js": "eslint src/ --ext .js",
+    "test:ephemeral:smoke": "bash scripts/run-ephemeral-local.sh smoke",
+    "test:ephemeral:regression": "bash scripts/run-ephemeral-local.sh regression",
+    "test:ephemeral:smoke:woo": "bash scripts/run-ephemeral-local.sh smoke sandbox-woo",
+    "test:ephemeral:regression:woo": "bash scripts/run-ephemeral-local.sh regression sandbox-woo"
   },
   "dependencies": {
     "@emotion/react": "^11.11.1",
