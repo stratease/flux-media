@@ -335,8 +335,8 @@ The plugin includes a sophisticated GIF animation detector:
 
 ### Custom Tables
 - `wp_flux_media_optimizer_conversions` - Conversion records with file size tracking
-- `wp_flux_media_optimizer_logs` - Structured logging with pagination
-- `wp_flux_media_optimizer_settings` - Plugin settings
+- `wp_flux_plugins_logs` - Suite logging (flux-plugins-common; includes `plugin_slug`)
+- `wp_flux_media_optimizer_settings` - Plugin settings (legacy table name in docs; options use WordPress options API)
 
 ### WordPress Integration
 - Uses WordPress options API for configuration
@@ -354,14 +354,14 @@ The plugin includes a sophisticated GIF animation detector:
 - **Error Handling**: Consistent error response format
 
 ### API Endpoints
-All endpoints are prefixed with `/wp-json/flux-media-optimizer/v1/`:
+Plugin endpoints are prefixed with `/wp-json/flux-media-optimizer/v1/`:
 
-- `GET /system/status` - System status and capabilities
+- `GET /status` - System status and capabilities
 - `GET /options` - Plugin options
 - `POST /options` - Update plugin options
 - `GET /conversions/stats` - Conversion statistics
-- `POST /conversions/bulk` - Start bulk conversion
-- `GET /logs` - Get logs with pagination
+
+Logs: `GET /wp-json/flux-plugins-common/v1/logs` (see flux-plugins-common `RestApiService`)
 
 ## 🔧 Configuration
 

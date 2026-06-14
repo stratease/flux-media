@@ -87,7 +87,11 @@ class ConversionsController extends BaseController {
 
 			return $this->create_success_response( $stats, 'Conversion statistics retrieved successfully' );
 		} catch ( \Exception $e ) {
-			return $this->create_error_response( 'Failed to retrieve conversion statistics: ' . $e->getMessage() );
+			return $this->create_error_response_from_exception(
+				$e,
+				__( 'Failed to retrieve conversion statistics.', 'flux-media-optimizer' ),
+				'conversion_stats_failed'
+			);
 		}
 	}
 

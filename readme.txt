@@ -2,9 +2,9 @@
 Contributors: edaniels
 Tags: media optimizer, video compression, webp, avif, cdn
 Requires at least: 5.8
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 4.1.5
+Stable tag: 4.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -123,9 +123,17 @@ Flux Media Optimizer supports video optimization with FFmpeg. You can convert vi
 
 == Changelog ==
 
+= 4.1.6 =
+* Security: Harden external webhook endpoint (account ID verification, job-state checks, CDN host allowlist, rate limiting).
+* Security: Register webhook route only when external service is enabled and license is valid.
+* Fix: Remove duplicate admin AJAX handler registration for attachment actions.
+* Security: Avoid exposing raw exception messages in plugin REST error responses.
+* Removed legacy plugin logs REST API; suite logs use flux-plugins-common.
+
 = 4.1.5 =
 * Guard against php 8.0 - we support php 8.1>.
 * Removed some unused code and minor cleanup.
+* Tested up to WordPress 7.0.
 
 = 4.1.4 =
 * Updating dependency to be compatible with php 8.

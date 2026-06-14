@@ -3,7 +3,7 @@
  * Plugin Name: Flux Media Optimizer – Image & Video Optimization by Flux Plugins
  * Plugin URI: https://fluxplugins.com/media-optimizer
  * Description: One-click image (AVIF & WebP) and video optimization for WordPress.
- * Version: 4.1.5
+ * Version: 4.1.6
  * Author: Flux Plugins
  * Author URI: https://fluxplugins.com
  * License: GPL-2.0+
@@ -11,7 +11,7 @@
  * Text Domain: flux-media-optimizer
  * Domain Path: /languages
  * Requires at least: 5.8
- * Tested up to: 6.9
+ * Tested up to: 7.0
  * Requires PHP: 8.1
  *
  * Copyright 2025 Flux Plugins
@@ -29,7 +29,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants.
-define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.5' );
+define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.6' );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE', __FILE__ );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -57,6 +57,44 @@ if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_TIMEOUT' ) ) {
  */
 if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_API_NAMESPACE' ) ) {
 	define( 'FLUX_MEDIA_OPTIMIZER_API_NAMESPACE', 'fmo' );
+}
+
+/**
+ * Default CDN hostnames for webhook URL validation (comma-separated).
+ *
+ * Override in wp-config.php or extend via FLUX_MEDIA_OPTIMIZER_CDN_HOST_ALLOWLIST.
+ *
+ * @since 4.1.6
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_DEFAULT_CDN_HOSTS' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_DEFAULT_CDN_HOSTS', 'cdn.fluxplugins.com' );
+}
+
+/**
+ * Additional CDN hostnames for webhook validation (comma-separated).
+ *
+ * @since 4.1.6
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_CDN_HOST_ALLOWLIST' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_CDN_HOST_ALLOWLIST', '' );
+}
+
+/**
+ * Maximum webhook requests per account per rate window.
+ *
+ * @since 4.1.6
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_LIMIT' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_LIMIT', 60 );
+}
+
+/**
+ * Webhook rate limit window in seconds.
+ *
+ * @since 4.1.6
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_WINDOW' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_WINDOW', 60 );
 }
 
 // Check PHP version compatibility.

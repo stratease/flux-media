@@ -8,6 +8,7 @@
 
 namespace FluxMedia\App\Services;
 
+use FluxMedia\FluxPlugins\Common\License\LicenseService;
 
 /**
  * Settings management class with constants and centralized getter/setter methods.
@@ -564,7 +565,7 @@ class Settings {
 		$enabled = (bool) self::get( 'external_service_enabled', self::DEFAULT_EXTERNAL_SERVICE_ENABLED );
 		
 		// Use common library LicenseService instead.
-		$license_service = \FluxMedia\FluxPlugins\Common\License\LicenseService::get_instance();
+		$license_service = LicenseService::get_instance();
 		$has_license = ! empty( $license_service->get_license_key() );
 		
 		// External service cannot be enabled without a license key.
@@ -580,6 +581,24 @@ class Settings {
 	 */
 	public static function set_external_service_enabled( $enabled ) {
 		return self::set( 'external_service_enabled', (bool) $enabled );
+	}
+
+	/**
+	 * Whether the external webhook REST route should be registered.
+	 *
+	 * Matches external processor gating: enabled setting, license key present, and valid license.
+	 *
+	 * @since 4.1.6
+	 * @return bool True if webhook route should be registered.
+	 */
+	public static function should_register_webhook_route() {
+		if ( ! self::is_external_service_enabled() ) {
+			return false;
+		}
+
+		$license_service = LicenseService::get_instance();
+
+		return $license_service->is_license_valid();
 	}
 
 }

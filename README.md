@@ -35,6 +35,33 @@ All plugin features work fully without these services. These are optional enhanc
 - **CDN integration** - Optional global content delivery for image serving
 - **Priority support** - Optional support tier for external service users
 
+## Security
+
+### Webhook endpoint (`POST /wp-json/flux-media-optimizer/v1/webhook`)
+
+Used when external (SaaS) processing is enabled with a **valid license**. The route is not registered unless both conditions are met.
+
+| Control | Behavior |
+|--------|----------|
+| Authentication | Site `account_id` (UUID) must match; compared with `hash_equals()` in `permission_callback` |
+| Rate limiting | `FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_LIMIT` requests per `FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_WINDOW` seconds (defaults: 60 per 60s) |
+| Attachment | Must be an existing `attachment` post |
+| Job state | Updates only when state is `queued` or `processing` |
+| CDN URLs | Host must appear on allowlist: `FLUX_MEDIA_OPTIMIZER_DEFAULT_CDN_HOSTS`, host from `FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL`, plus `FLUX_MEDIA_OPTIMIZER_CDN_HOST_ALLOWLIST` |
+
+Override defaults in `wp-config.php` when needed (staging CDN host, stricter limits):
+
+```php
+define( 'FLUX_MEDIA_OPTIMIZER_CDN_HOST_ALLOWLIST', 'cdn.staging.example.com' );
+define( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_LIMIT', 30 );
+```
+
+**Do not** set `FLUX_MEDIA_OPTIMIZER_PULL_FILE_URL_DOMAIN` in production; it rewrites pull and webhook URLs for local dev only.
+
+### Admin REST API
+
+Plugin routes (`flux-media-optimizer/v1`: options, status, conversions) require `manage_options`. Suite logs use `flux-plugins-common/v1/logs` (filter with `plugin_slug=flux-media-optimizer`).
+
 ## 🔒 Privacy & Data Protection
 
 ### Local Processing (Default)
@@ -149,15 +176,15 @@ flux-media-optimizer/
 
 ## 🚀 API Endpoints
 
-All endpoints are prefixed with `/wp-json/flux-media-optimizer/v1/`:
+Plugin REST endpoints are prefixed with `/wp-json/flux-media-optimizer/v1/`:
 
-- `GET /system/status` - System status and capabilities
+- `GET /status` - System status and capabilities
 - `GET /options` - Plugin options
 - `POST /options` - Update plugin options
 - `GET /conversions/stats` - Conversion statistics
-- `POST /conversions/bulk` - Start bulk conversion
-- `GET /logs` - Get logs with pagination
-- `POST /webhook` - Callback endpoint for external processing service
+- `POST /webhook` - Callback endpoint for external processing service (SaaS + valid license only)
+
+Suite logs (admin Logs screen): `GET /wp-json/flux-plugins-common/v1/logs?plugin_slug=flux-media-optimizer`
 
 ## 🔮 Future Roadmap
 

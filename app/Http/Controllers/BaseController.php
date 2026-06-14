@@ -62,6 +62,29 @@ abstract class BaseController extends WP_REST_Controller {
 	}
 
 	/**
+	 * Log exception details and return a generic error response to the client.
+	 *
+	 * @since 4.1.6
+	 * @param \Exception $exception       Caught exception.
+	 * @param string     $client_message  Safe message for REST clients.
+	 * @param string     $error_code      Error code.
+	 * @param int        $http_status     HTTP status code.
+	 * @return WP_REST_Response Error response.
+	 */
+	protected function create_error_response_from_exception( \Exception $exception, $client_message, $error_code = 'error', $http_status = 500 ) {
+		$this->logger->error(
+			$client_message . ': ' . $exception->getMessage(),
+			[
+				'error_code' => $error_code,
+				'http_status' => $http_status,
+				'exception' => $exception,
+			]
+		);
+
+		return $this->create_error_response( $client_message, $error_code, $http_status );
+	}
+
+	/**
 	 * Create a standardized success response.
 	 *
 	 * @since 0.1.0

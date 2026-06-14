@@ -90,7 +90,11 @@ class StatusController extends BaseController {
 
 			return $this->create_success_response( $status, 'System status retrieved successfully' );
 		} catch ( \Exception $e ) {
-			return $this->create_error_response( 'Failed to retrieve system status: ' . $e->getMessage() );
+			return $this->create_error_response_from_exception(
+				$e,
+				__( 'Failed to retrieve system status.', 'flux-media-optimizer' ),
+				'status_retrieval_failed'
+			);
 		}
 	}
 

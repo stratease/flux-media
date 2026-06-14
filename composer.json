@@ -60,7 +60,7 @@
             "@test"
         ],
         "copy-common-assets": [
-            "sh -c 'if [ -d vendor/stratease/flux-plugins-common/src/assets ]; then mkdir -p src/assets/common && cp -r vendor/stratease/flux-plugins-common/src/assets/* src/assets/common/ && echo \"✅ Copied common library assets to src/assets/common/\"; else echo \"⚠️  Common library assets not found in vendor/\"; fi'"
+            "sh -c 'SRC=vendor/stratease/flux-plugins-common/src/assets; DST=src/assets/common; if [ -d \"$SRC\" ]; then mkdir -p \"$DST/js\" \"$DST/images\"; cp -r \"$SRC/images\" \"$DST/\" 2>/dev/null || true; cp -r \"$SRC/js/dist\" \"$DST/js/\"; echo \"✅ Copied common runtime assets (js/dist + images) to src/assets/common/\"; else echo \"⚠️  Common library assets not found in vendor/ — run composer install\"; fi'"
         ],
         "prefix-namespaces": [
             "@copy-common-assets",

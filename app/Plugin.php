@@ -20,11 +20,9 @@ use FluxMedia\App\Http\Controllers\AdminController;
 use FluxMedia\App\Http\Controllers\OptionsController;
 use FluxMedia\App\Http\Controllers\StatusController;
 use FluxMedia\App\Http\Controllers\ConversionsController;
-use FluxMedia\App\Http\Controllers\LogsController;
 use FluxMedia\App\Http\Controllers\WebhookController;
 use FluxMedia\App\Services\ExternalOptimizationProvider;
 use FluxMedia\App\Services\ConversionTracker;
-use FluxMedia\App\Services\LogsService;
 use FluxMedia\App\Services\Database;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
 use FluxMedia\App\Services\BulkConverter;
@@ -149,9 +147,8 @@ class Plugin {
     private function init_admin() {
         $admin_controller = new AdminController( $this->settings );
         $admin_controller->init();
-        
-        // Initialize AJAX handlers using WordPressProvider
-        $this->init_ajax_handlers();
+
+        // Attachment AJAX handlers are registered in WordPressProvider::init() only (avoid duplicate hooks).
         
         // Enqueue admin scripts
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts' ] );
@@ -176,8 +173,7 @@ class Plugin {
         // The common library provides the page, but individual plugins decide if they want to register it.
         $menu_service->register_license_page();
         
-        // Register Logs page if this plugin needs it.
-        // The common library provides the page, but individual plugins decide if they want to register it.
+        // Logs admin UI and REST API: flux-plugins-common (MenuService::register_logs_page + RestApiService).
         $menu_service->register_logs_page();
     }
 
@@ -202,20 +198,17 @@ class Plugin {
         $processor_detector = new ProcessorDetector();
         $format_detector = new FormatSupportDetector( $processor_detector );
         $conversion_tracker = new ConversionTracker( $this->logger );
-        $logs_service = new LogsService();
 
-        // Register controllers
+        // Register controllers (logs: see flux-plugins-common/v1 via RestApiService).
         $options_controller = new OptionsController( $this->settings );
         $status_controller = new StatusController( $format_detector, $processor_detector );
         $conversions_controller = new ConversionsController( $conversion_tracker );
-        $logs_controller = new LogsController( $logs_service );
         $options_controller->register_routes();
         $status_controller->register_routes();
         $conversions_controller->register_routes();
-        $logs_controller->register_routes();
         
-        // Register webhook controller if external service is enabled
-        if ( Settings::is_external_service_enabled() ) {
+        // Register webhook controller only when external SaaS is active with a valid license.
+        if ( Settings::should_register_webhook_route() ) {
             $webhook_controller = new WebhookController();
             $webhook_controller->register_routes();
         }
@@ -269,19 +262,6 @@ class Plugin {
      */
     public function get_video_converter() {
         return $this->video_converter;
-    }
-
-    /**
-     * Initialize AJAX handlers for attachment actions.
-     *
-     * @since 0.1.0
-     * @return void
-     */
-    private function init_ajax_handlers() {
-        // AJAX handlers for logged-in users
-        add_action( 'wp_ajax_flux_media_optimizer_convert_attachment', [ $this->wordpress_provider, 'handle_ajax_convert_attachment' ] );
-        add_action( 'wp_ajax_flux_media_optimizer_disable_conversion', [ $this->wordpress_provider, 'handle_ajax_disable_conversion' ] );
-        add_action( 'wp_ajax_flux_media_optimizer_enable_conversion', [ $this->wordpress_provider, 'handle_ajax_enable_conversion' ] );
     }
 
     /**

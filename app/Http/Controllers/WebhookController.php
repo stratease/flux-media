@@ -11,7 +11,7 @@ namespace FluxMedia\App\Http\Controllers;
 use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Services\AttachmentMetaHandler;
 use FluxMedia\App\Services\ConversionTracker;
-use FluxMedia\FluxPlugins\Common\Account\AccountIdService;
+use FluxMedia\App\Services\WebhookAuthService;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -40,20 +40,8 @@ class WebhookController extends BaseController {
 		register_rest_route( 'flux-media-optimizer/v1', '/webhook', [
 			'methods' => 'POST',
 			'callback' => [ $this, 'handle_webhook' ],
-			'permission_callback' => [ $this, 'verify_webhook' ],
+			'permission_callback' => [ WebhookAuthService::class, 'verify_request' ],
 		] );
-	}
-
-	/**
-	 * Verify webhook request.
-	 *
-	 * @since 3.0.0
-	 * @param WP_REST_Request $request Request object.
-	 * @return bool True if request is valid.
-	 */
-	public function verify_webhook( WP_REST_Request $request ) {
-		// Basic verification - can be enhanced with signature checking.
-		return true;
 	}
 
 	/**
@@ -75,40 +63,20 @@ class WebhookController extends BaseController {
 	 * }
 	 *
 	 * @since 3.0.0
+	 * @since 4.1.6 Security checks run in verify_webhook before this callback executes.
 	 * @param WP_REST_Request $request Request object.
 	 * @return WP_REST_Response Response object.
 	 */
 	public function handle_webhook( WP_REST_Request $request ) {
-		// Validate account_id from request.
-		$request_account_id = sanitize_text_field( $request->get_param( 'account_id' ) );
-		$stored_account_id = AccountIdService::get_instance()->get_account_id();
-
-		if ( empty( $request_account_id ) ) {
-			return $this->create_error_response( 'Missing account_id', 'missing_account_id', 400 );
-		}
-
-		if ( empty( $stored_account_id ) ) {
-			return $this->create_error_response( 'Account ID not configured', 'account_id_not_configured', 500 );
-		}
-
-		if ( $request_account_id !== $stored_account_id ) {
-			$this->logger->warning( "Webhook account_id mismatch. Request: " . AccountIdService::obfuscate( $request_account_id ) . ", Stored: " . AccountIdService::obfuscate( $stored_account_id ) );
-			return $this->create_error_response( 'Invalid account_id', 'invalid_account_id', 403 );
-		}
-
-		// Get attachment_id from request.
+		// Get attachment_id from request (validated in verify_webhook).
 		$attachment_id_param = $request->get_param( 'attachment_id' );
-		$attachment_id = ! empty( $attachment_id_param ) ? (int) $attachment_id_param : null;
-
-		if ( empty( $attachment_id ) ) {
-			return $this->create_error_response( 'Missing attachment_id', 'missing_attachment_id', 400 );
-		}
+		$attachment_id = ! empty( $attachment_id_param ) ? (int) $attachment_id_param : 0;
 
 		// Get cdn_urls from request.
 		$cdn_urls = $request->get_param( 'cdn_urls' );
 
 		// Determine status: if cdn_urls provided, status is 'completed', otherwise 'failed'.
-		$status = ! empty( $cdn_urls ) && is_array( $cdn_urls ) ? 'completed' : 'failed';
+		$status = WebhookAuthService::resolve_incoming_status( $cdn_urls );
 
 		// Update job state in post meta using AttachmentMetaHandler.
 		AttachmentMetaHandler::set_external_job_state( $attachment_id, $status );
@@ -233,4 +201,3 @@ class WebhookController extends BaseController {
 		return rest_url( 'flux-media-optimizer/v1/webhook' );
 	}
 }
-

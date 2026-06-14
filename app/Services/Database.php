@@ -19,6 +19,7 @@ class Database {
 	 * Create all Flux Media Optimizer database tables.
 	 *
 	 * @since 0.1.0
+	 * @since 4.1.6 Stopped creating legacy `flux_media_optimizer_logs` (suite uses `flux_plugins_logs`).
 	 */
 	public static function create_tables() {
 		global $wpdb;
@@ -44,18 +45,7 @@ class Database {
 			KEY converted_at (converted_at)
 		) $charset_collate;";
 
-		// Create logs table
-		$logs_table = $wpdb->prefix . 'flux_media_optimizer_logs';
-		$logs_sql = "CREATE TABLE $logs_table (
-			id bigint(20) NOT NULL AUTO_INCREMENT,
-			level varchar(20) NOT NULL,
-			message text NOT NULL,
-			context longtext,
-			created_at datetime DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (id),
-			KEY level (level),
-			KEY created_at (created_at)
-		) $charset_collate;";
+		// Logging uses flux-plugins-common table `{prefix}flux_plugins_logs` (see Logger\DatabaseHandler).
 
 		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 		
@@ -66,11 +56,9 @@ class Database {
 		if ( ! $tables_exist ) {
 			// Tables don't exist, create them directly
 			$wpdb->query( $conversions_sql );
-			$wpdb->query( $logs_sql );
 		} else {
 			// Tables exist, use dbDelta to update them if needed
 			dbDelta( $conversions_sql );
-			dbDelta( $logs_sql );
 		}
 
 		// Store database version for future updates
@@ -90,6 +78,7 @@ class Database {
 		$external_jobs_table = $wpdb->prefix . 'flux_media_optimizer_external_jobs';
 
 		$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %s", $conversions_table ) );
+		// Legacy per-plugin logs table (replaced by flux_plugins_logs in flux-plugins-common).
 		$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %s", $logs_table ) );
 		// Drop external_jobs table if it exists (legacy table, no longer used).
 		$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %s", $external_jobs_table ) );
@@ -108,12 +97,8 @@ class Database {
 		global $wpdb;
 
 		$conversions_table = $wpdb->prefix . 'flux_media_optimizer_conversions';
-		$logs_table = $wpdb->prefix . 'flux_media_optimizer_logs';
 
-		$conversions_exists = $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $conversions_table ) ) === $conversions_table;
-		$logs_exists = $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $logs_table ) ) === $logs_table;
-
-		return $conversions_exists && $logs_exists;
+		return $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $conversions_table ) ) === $conversions_table;
 	}
 
 	/**

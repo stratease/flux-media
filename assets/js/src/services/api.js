@@ -127,18 +127,6 @@ class ApiService {
     });
   }
 
-  // Logs
-  async getLogs(params = {}) {
-    const queryParams = new URLSearchParams();
-    
-    if (params.page) queryParams.append('page', params.page.toString());
-    if (params.per_page) queryParams.append('per_page', params.per_page.toString());
-    if (params.level) queryParams.append('level', params.level);
-    if (params.search) queryParams.append('search', params.search);
-    
-    return this.request(`/logs?${queryParams.toString()}`);
-  }
-
   // Cleanup operations
   async cleanupTempFiles() {
     return this.request('/cleanup/temp-files', {

@@ -27,7 +27,6 @@ export const useCleanupOldRecords = () => {
     onSuccess: () => {
       // Invalidate conversion-related queries
       queryClient.invalidateQueries({ queryKey: ['conversions'] });
-      queryClient.invalidateQueries({ queryKey: ['logs'] });
     },
   });
 };

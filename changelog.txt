@@ -1,3 +1,10 @@
+= 4.1.6 =
+* Security: Harden external webhook endpoint (account ID verification in permission_callback, job-state checks, CDN host allowlist, rate limiting).
+* Security: Register webhook route only when external service is enabled and license is valid.
+* Fix: Remove duplicate admin AJAX handler registration for attachment actions.
+* Security: Avoid exposing raw exception messages in plugin REST error responses.
+* Removed legacy plugin logs REST API and `flux_media_optimizer_logs` table creation; logging uses flux-plugins-common (`flux_plugins_logs` + `flux-plugins-common/v1/logs`).
+
 = 4.1.5 =
 * Guard against php 8.0 - we support php 8.1>.
 * Removed some unused code and minor cleanup.

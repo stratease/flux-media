@@ -125,7 +125,11 @@ class OptionsController extends BaseController {
 			// License fields are handled by separate /license endpoint.
 			return $this->create_success_response( $options, 'Options retrieved successfully' );
 		} catch ( \Exception $e ) {
-			return $this->create_error_response( 'Failed to retrieve options: ' . $e->getMessage() );
+			return $this->create_error_response_from_exception(
+				$e,
+				__( 'Failed to retrieve options.', 'flux-media-optimizer' ),
+				'options_retrieval_failed'
+			);
 		}
 	}
 
@@ -158,7 +162,11 @@ class OptionsController extends BaseController {
 			
 			return $this->create_success_response( $updated_options, 'Options updated successfully' );
 		} catch ( \Exception $e ) {
-			return $this->create_error_response( 'Failed to update options: ' . $e->getMessage() );
+			return $this->create_error_response_from_exception(
+				$e,
+				__( 'Failed to update options.', 'flux-media-optimizer' ),
+				'options_update_failed'
+			);
 		}
 	}
 
