@@ -11,6 +11,7 @@ One-click AVIF/WebP image optimization and video compression for WordPress. Auto
 - **Smart Serving**: Uses `<picture>` tags or direct URL replacement based on settings
 - **Quality Control**: Configurable quality settings with version-specific AVIF optimization
 - **Automatic Processing**: Convert on upload and bulk process existing media
+- **Media Library Status**: Optimization column and filters in the Media Library list view (Optimized, Pending, Failed, Disabled, Unprocessed)
 - **WordPress Integration**: Seamless integration with Gutenberg blocks and responsive images
 - **GIF Support**: Full support for static and animated GIFs with animation preservation (requires Imagick)
 
@@ -58,7 +59,25 @@ define( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_LIMIT', 30 );
 
 **Do not** set `FLUX_MEDIA_OPTIMIZER_PULL_FILE_URL_DOMAIN` in production; it rewrites pull and webhook URLs for local dev only.
 
-### Admin REST API
+### Cleanup and job lifecycle (optional Flux cloud processing)
+
+Daily cleanup (`flux_media_optimizer_cleanup`) runs when external (SaaS) processing is enabled with a valid license:
+
+| Control | Behavior |
+|--------|----------|
+| Stale jobs | `queued`/`processing` jobs older than `FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD` (default: 6 hours) are marked `failed` |
+| Retries | Failed jobs are retried up to `FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT` times (default: 3), in batches of `FLUX_MEDIA_OPTIMIZER_CLEANUP_BATCH_SIZE` (default: 50) |
+| Notices | Expired admin notice transients are cleaned |
+
+Override defaults in `wp-config.php` when needed:
+
+```php
+define( 'FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD', 4 * HOUR_IN_SECONDS );
+define( 'FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT', 5 );
+define( 'FLUX_MEDIA_OPTIMIZER_CLEANUP_BATCH_SIZE', 25 );
+```
+
+Local optimization, Media Library status, settings, and logs are **not** license-gated.
 
 Plugin routes (`flux-media-optimizer/v1`: options, status, conversions) require `manage_options`. Suite logs use `flux-plugins-common/v1/logs` (filter with `plugin_slug=flux-media-optimizer`).
 
@@ -116,6 +135,7 @@ To build the plugin from source:
    ```bash
    npm run start
    ```
+   Default webpack dev server port: **3000**. Without defining `FLUX_MEDIA_OPTIMIZER_DEV_SCRIPT_BASE` in `wp-config.php`, WordPress loads built bundles from `assets/js/dist/` even when `WP_DEBUG` and `SCRIPT_DEBUG` are on. For HMR, define the dev base in local config only (see [flux-plugins-common README — Optional local dev script base](https://github.com/stratease/flux-plugins-common#optional-local-dev-script-base-wp-config-only)).
 
 The source code is available in the GitHub repository: [https://github.com/stratease/flux-media-optimizer](https://github.com/stratease/flux-media-optimizer)
 
@@ -156,6 +176,8 @@ This plugin uses a modern, decoupled architecture that separates business logic 
 - **Dependency Injection**: Uses interfaces for testable, decoupled components
 - **Unified Converter Interface**: Fluent API with centralized format constants
 - **External Optimization**: `ExternalOptimizationProvider` manages communication with the SaaS processing service and CDN
+- **Cleanup**: `CleanupService` handles daily stale-job recovery, bounded retries, and notice cleanup
+- **Media Library Status**: `MediaLibraryStatusService` adds optimization status column and filters in the Media Library
 - **Shared Library**: Uses `flux-plugins-common` for shared services (menu system, account ID, logging, API client) - See [flux-plugins-common repository](https://github.com/stratease/flux-plugins-common) for details
 
 ## 📁 Project Structure

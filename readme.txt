@@ -4,7 +4,7 @@ Tags: media optimizer, video compression, webp, avif, cdn
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 4.1.6
+Stable tag: 4.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,6 +35,7 @@ Flux Media Optimizer boosts your site's performance metrics and Google PageSpeed
 * **Automatic Processing** – Convert on upload and bulk process existing media with one click
 * **Quality Control** – Configurable quality settings with version-specific AVIF optimization
 * **Individual File Controls** – Disable or manually reconvert individual files for granular control
+* **Media Library Status** – Optimization column and filters in the Media Library list view (Optimized, Pending, Failed, Disabled, Unprocessed)
 * **Gutenberg Block Integration** – View image compression information directly in image blocks
 * **WordPress Integration** – Seamless integration with galleries, responsive images, and all WordPress image functions
 * **Optimize All Image Files** – Supports optimization for PNG, JPEG, and GIF files
@@ -83,6 +84,10 @@ No, Flux Media Optimizer creates new optimized versions while keeping your origi
 
 Yes! Flux Media Optimizer can bulk process all your existing images and videos. Just go to the settings page and enable bulk conversion to optimize your entire media library. However, some pages utilizing the media files may require updating, as they may have directly embedded the non-optimized format.
 
+= Can I see which media files are optimized? =
+
+Yes. The Media Library list view includes an Optimization column with status badges and a filter dropdown for Optimized, Pending, Failed, Disabled, and Unprocessed items. Local optimization status is always visible; cloud Pending/Failed states appear when optional Flux cloud processing is enabled.
+
 = What is the CDN feature? =
 
 The CDN (Content Delivery Network) feature is an optional service that stores your media files on a global network of servers. This ensures your images, videos and other media files load instantly for visitors worldwide, regardless of their location. The CDN feature requires explicit opt-in and a license key - all core functionality works locally without it.
@@ -123,6 +128,10 @@ Flux Media Optimizer supports video optimization with FFmpeg. You can convert vi
 
 == Changelog ==
 
+= 4.2.0 =
+* Feature: Media Library shows optimization status and filter options (Optimized, Pending, Failed, Disabled, Unprocessed). Conversion stats API now reports failed external job counts. New constants added: FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD, FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT, FLUX_MEDIA_OPTIMIZER_CLEANUP_BATCH_SIZE.
+* Feature: Daily cleanup cron recovers stale external jobs, automatically retries failed jobs with a set limit, and cleans expired admin notices.
+
 = 4.1.6 =
 * Security: Harden external webhook endpoint (account ID verification, job-state checks, CDN host allowlist, rate limiting).
 * Security: Register webhook route only when external service is enabled and license is valid.
@@ -143,6 +152,9 @@ Flux Media Optimizer supports video optimization with FFmpeg. You can convert vi
 
 
 == Upgrade Notice ==
+
+= 4.2.0 =
+Adds Media Library optimization status visibility and daily cleanup for stale external jobs with bounded retries. Local features remain fully available without a license.
 
 = 4.0.0 =
 Major update with improved bulk optimization processing, fixed Action Scheduler bulk operations, and core system decoupling for future plugin integrations. Bulk optimization issues have been resolved for more reliable processing of existing media libraries.

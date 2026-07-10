@@ -27,6 +27,8 @@ use FluxMedia\App\Services\Database;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
 use FluxMedia\App\Services\BulkConverter;
 use FluxMedia\App\Services\ActionSchedulerService;
+use FluxMedia\App\Services\CleanupService;
+use FluxMedia\App\Services\MediaLibraryStatusService;
 use FluxMedia\App\Services\ExternalApiClient;
 
 /**
@@ -118,6 +120,19 @@ class Plugin {
         $bulk_converter = new BulkConverter( $this->logger, $service_locator, $conversion_tracker );
         $service_locator->init();
         $this->wordpress_provider->set_service_locator( $service_locator );
+
+        // Daily cleanup and Media Library status (admin only).
+        $external_provider = null;
+        if ( Settings::is_external_service_enabled() ) {
+            $external_provider = new ExternalOptimizationProvider( $this->logger );
+        }
+        $cleanup_service = new CleanupService( $this->logger, $external_provider );
+        $cleanup_service->init();
+
+        if ( is_admin() ) {
+            $media_library_status_service = new MediaLibraryStatusService();
+            $media_library_status_service->init();
+        }
         
         // Initialize Action Scheduler service on 'init' hook after Action Scheduler is ready.
         // Action Scheduler initializes on 'init' priority 1, so we hook in after that.

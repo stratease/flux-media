@@ -66,12 +66,7 @@ class ExternalOptimizationProvider {
 	 */
 	public function register_hooks() {
 		// Webhook endpoint is registered via WebhookController in Plugin class.
-		
-		// Schedule retry cron for failed jobs.
-		if ( ! wp_next_scheduled( 'flux_media_optimizer_retry_failed_jobs' ) ) {
-			wp_schedule_event( time(), 'hourly', 'flux_media_optimizer_retry_failed_jobs' );
-		}
-		add_action( 'flux_media_optimizer_retry_failed_jobs', [ $this, 'retry_failed_jobs' ] );
+		// Failed-job retries are handled by CleanupService (daily cleanup + legacy hook delegate).
 	}
 
 	/**
@@ -222,30 +217,32 @@ class ExternalOptimizationProvider {
 	 *
 	 * @since 3.0.0
 	 * @since 3.0.0 Updated to use AttachmentMetaHandler and WP_Query instead of external_jobs table.
+	 * @since 4.2.0 Deprecated for direct cron use; CleanupService owns bounded retry orchestration.
 	 * @return void
 	 */
 	public function retry_failed_jobs() {
-		// Get all attachments with failed job state.
-		// Note: This queries all attachments - if performance becomes an issue, consider adding a meta query optimization.
-		$args = [
-			'post_type' => 'attachment',
-			'post_status' => 'any',
-			'posts_per_page' => -1,
-			'meta_query' => [
-				[
-					'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
-					'value' => 'failed',
-					'compare' => '=',
+		// Retained for backward compatibility if called directly; CleanupService is the orchestrator.
+		$query = new \WP_Query(
+			[
+				'post_type' => 'attachment',
+				'post_status' => 'any',
+				'posts_per_page' => CleanupService::get_cleanup_batch_size(),
+				'meta_query' => [
+					[
+						'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
+						'value' => 'failed',
+						'compare' => '=',
+					],
 				],
-			],
-		];
-		
-		$query = new \WP_Query( $args );
-		
-		if ( $query->have_posts() ) {
-			foreach ( $query->posts as $post ) {
-				$this->retry_failed_job( $post->ID );
-			}
+			]
+		);
+
+		if ( ! $query->have_posts() ) {
+			return;
+		}
+
+		foreach ( $query->posts as $post ) {
+			$this->retry_failed_job( $post->ID );
 		}
 	}
 

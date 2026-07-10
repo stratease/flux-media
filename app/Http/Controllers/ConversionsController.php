@@ -9,6 +9,7 @@
 namespace FluxMedia\App\Http\Controllers;
 
 use FluxMedia\FluxPlugins\Common\Logger\Logger;
+use FluxMedia\App\Services\AttachmentMetaHandler;
 use FluxMedia\App\Services\ConversionTracker;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -70,7 +71,7 @@ class ConversionsController extends BaseController {
 			$stats = [
 				'total_conversions' => (int) $conversion_stats['total_conversions'],
 				'successful_conversions' => (int) $conversion_stats['total_conversions'], // All recorded conversions are successful
-				'failed_conversions' => 0, // Failed conversions are not recorded
+				'failed_conversions' => AttachmentMetaHandler::count_attachments_by_external_job_state( 'failed' ),
 				'total_original_bytes' => $savings_stats['total_original_bytes'],
 				'total_converted_bytes' => $savings_stats['total_converted_bytes'],
 				'total_savings_bytes' => $savings_stats['total_savings_bytes'],

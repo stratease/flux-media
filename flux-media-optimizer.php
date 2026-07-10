@@ -3,7 +3,7 @@
  * Plugin Name: Flux Media Optimizer – Image & Video Optimization by Flux Plugins
  * Plugin URI: https://fluxplugins.com/media-optimizer
  * Description: One-click image (AVIF & WebP) and video optimization for WordPress.
- * Version: 4.1.6
+ * Version: 4.2.0
  * Author: Flux Plugins
  * Author URI: https://fluxplugins.com
  * License: GPL-2.0+
@@ -29,7 +29,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants.
-define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.1.6' );
+define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.2.0' );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE', __FILE__ );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -95,6 +95,33 @@ if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_LIMIT' ) ) {
  */
 if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_WINDOW' ) ) {
 	define( 'FLUX_MEDIA_OPTIMIZER_WEBHOOK_RATE_WINDOW', 60 );
+}
+
+/**
+ * Stale external job threshold in seconds (queued/processing older than this are marked failed).
+ *
+ * @since 4.2.0
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD', 6 * HOUR_IN_SECONDS );
+}
+
+/**
+ * Maximum failed external job retry attempts during cleanup.
+ *
+ * @since 4.2.0
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT', 3 );
+}
+
+/**
+ * Maximum attachments processed per cleanup batch.
+ *
+ * @since 4.2.0
+ */
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_CLEANUP_BATCH_SIZE' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_CLEANUP_BATCH_SIZE', 50 );
 }
 
 // Check PHP version compatibility.
@@ -363,6 +390,7 @@ function flux_media_optimizer_activate() {
 function flux_media_optimizer_deactivate() {
 	// Clear scheduled WP Cron events.
 	wp_clear_scheduled_hook( 'flux_media_optimizer_cleanup' );
+	wp_clear_scheduled_hook( 'flux_media_optimizer_retry_failed_jobs' );
 	// Note: Bulk conversion now uses Action Scheduler, which handles its own cleanup
 
 	// Note: We don't drop tables on deactivation to preserve data
@@ -441,6 +469,7 @@ function flux_media_optimizer_uninstall() {
 
 	// Clear any scheduled WP Cron jobs.
 	wp_clear_scheduled_hook( 'flux_media_optimizer_cleanup' );
+	wp_clear_scheduled_hook( 'flux_media_optimizer_retry_failed_jobs' );
 	// Note: Action Scheduler actions are automatically cleaned up by Action Scheduler
 
 	// Remove any transients.

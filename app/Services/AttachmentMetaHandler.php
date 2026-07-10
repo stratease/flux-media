@@ -63,6 +63,30 @@ class AttachmentMetaHandler {
 	const META_KEY_EXTERNAL_JOB_STATE = '_flux_media_optimizer_external_job_state';
 
 	/**
+	 * Meta key for external job started timestamp (Unix time).
+	 *
+	 * @since 4.2.0
+	 * @var string
+	 */
+	const META_KEY_EXTERNAL_JOB_STARTED_AT = '_flux_media_optimizer_external_job_started_at';
+
+	/**
+	 * Meta key for external job retry attempt count.
+	 *
+	 * @since 4.2.0
+	 * @var string
+	 */
+	const META_KEY_EXTERNAL_JOB_RETRY_COUNT = '_flux_media_optimizer_external_job_retry_count';
+
+	/**
+	 * In-flight external job states.
+	 *
+	 * @since 4.2.0
+	 * @var string[]
+	 */
+	private const IN_FLIGHT_JOB_STATES = [ 'queued', 'processing' ];
+
+	/**
 	 * Meta key for file URLs.
 	 *
 	 * Stores array of ALL file URLs (both local and external) for efficient lookup.
@@ -405,7 +429,7 @@ class AttachmentMetaHandler {
 		self::delete_conversion_date( $attachment_id );
 		// Enable conversion (which deletes the disabled flag meta)
 		self::enable_conversion( $attachment_id );
-		self::delete_external_job_state( $attachment_id );
+		self::delete_external_job_lifecycle_meta( $attachment_id );
 		self::delete_file_urls( $attachment_id );
 		self::delete_converted_files_grouped_by_size( $attachment_id );
 
@@ -742,7 +766,10 @@ class AttachmentMetaHandler {
 	/**
 	 * Set external job state for an attachment.
 	 *
+	 * Manages lifecycle meta: started timestamp for in-flight jobs, cleanup on completion.
+	 *
 	 * @since 3.0.0
+	 * @since 4.2.0 Records started timestamp and preserves retry count for failed jobs.
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $state         Job state ('queued', 'processing', 'completed', 'failed').
 	 * @return bool|int Meta ID if the key didn't exist, true on successful update, false on failure.
@@ -752,7 +779,108 @@ class AttachmentMetaHandler {
 		if ( ! in_array( $state, $valid_states, true ) ) {
 			return false;
 		}
+
+		if ( $state === 'queued' ) {
+			self::set_external_job_started_at( $attachment_id, time() );
+		} elseif ( $state === 'processing' ) {
+			if ( self::get_external_job_started_at( $attachment_id ) <= 0 ) {
+				self::set_external_job_started_at( $attachment_id, time() );
+			}
+		} elseif ( $state === 'completed' ) {
+			self::delete_external_job_started_at( $attachment_id );
+			self::reset_external_job_retry_count( $attachment_id );
+		}
+
 		return update_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STATE, $state );
+	}
+
+	/**
+	 * Get external job started timestamp for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return int Unix timestamp, or 0 if not set.
+	 */
+	public static function get_external_job_started_at( $attachment_id ) {
+		$started_at = get_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STARTED_AT, true );
+		return is_numeric( $started_at ) ? (int) $started_at : 0;
+	}
+
+	/**
+	 * Set external job started timestamp for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @param int $timestamp     Unix timestamp.
+	 * @return bool|int Meta ID if the key didn't exist, true on successful update, false on failure.
+	 */
+	public static function set_external_job_started_at( $attachment_id, $timestamp ) {
+		$timestamp = absint( $timestamp );
+		if ( $timestamp <= 0 ) {
+			return false;
+		}
+
+		return update_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STARTED_AT, $timestamp );
+	}
+
+	/**
+	 * Delete external job started timestamp meta for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True on success, false on failure.
+	 */
+	public static function delete_external_job_started_at( $attachment_id ) {
+		return delete_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STARTED_AT );
+	}
+
+	/**
+	 * Get external job retry count for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return int Retry count (0 if not set).
+	 */
+	public static function get_external_job_retry_count( $attachment_id ) {
+		$retry_count = get_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_RETRY_COUNT, true );
+		return is_numeric( $retry_count ) ? (int) $retry_count : 0;
+	}
+
+	/**
+	 * Increment external job retry count for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return int New retry count after increment.
+	 */
+	public static function increment_external_job_retry_count( $attachment_id ) {
+		$new_count = self::get_external_job_retry_count( $attachment_id ) + 1;
+		update_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_RETRY_COUNT, $new_count );
+		return $new_count;
+	}
+
+	/**
+	 * Reset external job retry count for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool True on success, false on failure.
+	 */
+	public static function reset_external_job_retry_count( $attachment_id ) {
+		return delete_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_RETRY_COUNT );
+	}
+
+	/**
+	 * Delete all external job lifecycle meta for an attachment.
+	 *
+	 * @since 4.2.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return void
+	 */
+	public static function delete_external_job_lifecycle_meta( $attachment_id ) {
+		self::delete_external_job_state( $attachment_id );
+		self::delete_external_job_started_at( $attachment_id );
+		self::reset_external_job_retry_count( $attachment_id );
 	}
 
 	/**
@@ -764,6 +892,34 @@ class AttachmentMetaHandler {
 	 */
 	public static function delete_external_job_state( $attachment_id ) {
 		return delete_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STATE );
+	}
+
+	/**
+	 * Count attachments with a specific external job state.
+	 *
+	 * @since 4.2.0
+	 * @param string $state Job state ('queued', 'processing', 'completed', 'failed').
+	 * @return int Attachment count.
+	 */
+	public static function count_attachments_by_external_job_state( $state ) {
+		$query = new \WP_Query(
+			[
+				'post_type' => 'attachment',
+				'post_status' => 'any',
+				'posts_per_page' => 1,
+				'fields' => 'ids',
+				'no_found_rows' => false,
+				'meta_query' => [
+					[
+						'key' => self::META_KEY_EXTERNAL_JOB_STATE,
+						'value' => $state,
+						'compare' => '=',
+					],
+				],
+			]
+		);
+
+		return (int) $query->found_posts;
 	}
 
 	/**

@@ -1181,9 +1181,8 @@ class WordPressProvider {
             wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
         }
 
-        // Clear external job state to allow forced re-conversion
-        // This removes any 'queued' or 'processing' state that might be blocking conversion
-        AttachmentMetaHandler::delete_external_job_state( $attachment_id );
+        // Clear external job lifecycle meta to allow forced re-conversion.
+        AttachmentMetaHandler::delete_external_job_lifecycle_meta( $attachment_id );
 
         $result = $this->convert_attachment( $attachment_id );
         
