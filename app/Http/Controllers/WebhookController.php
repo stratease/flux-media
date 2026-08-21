@@ -78,8 +78,25 @@ class WebhookController extends BaseController {
 		// Determine status: if cdn_urls provided, status is 'completed', otherwise 'failed'.
 		$status = WebhookAuthService::resolve_incoming_status( $cdn_urls );
 
+		if ( 'failed' === $status ) {
+			AttachmentMetaHandler::mark_conversion_failed(
+				$attachment_id,
+				'External processing failed: no CDN URLs provided in webhook.'
+			);
+			$this->logger->error( "Job failed for attachment {$attachment_id}. No CDN URLs provided in webhook." );
+
+			return new WP_REST_Response(
+				[
+					'success' => true,
+					'message' => 'Webhook received; job marked failed.',
+				],
+				200
+			);
+		}
+
 		// Update job state in post meta using AttachmentMetaHandler.
 		AttachmentMetaHandler::set_external_job_state( $attachment_id, $status );
+		AttachmentMetaHandler::clear_conversion_failure( $attachment_id );
 
 		// Handle successful processing.
 		if ( $status === 'completed' ) {
@@ -179,13 +196,6 @@ class WebhookController extends BaseController {
 			}
 
 			$this->logger->info( "Job completed successfully for attachment {$attachment_id}" );
-		} else {
-			// Note: We don't clear converted_files_by_size here because:
-			// 1. There might be valid local conversions that should be preserved
-			// 2. The failed status is already set, which prevents reprocessing
-			// 3. Users can manually retry conversion if needed
-
-			$this->logger->error( "Job failed for attachment {$attachment_id}. No CDN URLs provided in webhook." );
 		}
 
 		return $this->create_success_response( null, 'Webhook processed successfully', 200 );

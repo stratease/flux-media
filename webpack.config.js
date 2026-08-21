@@ -33,13 +33,13 @@ const baseConfig = createBaseWebpackConfig({
 // Merge with plugin-specific config
 module.exports = {
   ...baseConfig,
+  // Production builds must not emit source maps into assets/js/dist (WP.org excludes *.map).
+  devtool: process.env.NODE_ENV === 'production' ? false : baseConfig.devtool,
   entry: {
     ...baseConfig.entry,
     admin: './assets/js/src/admin/index.js',
     attachment: './assets/js/src/admin/attachment.js',
-    'compatibility-dismiss': './assets/js/src/admin/compatibility-dismiss.js',
-    // Note: license-page is built separately by flux-plugins-common
-    // and loaded via MenuService enqueue
+    // Compatibility dismiss ships from src/assets/common (flux-plugins-common), not this webpack entry.
   },
   output: {
     ...baseConfig.output,

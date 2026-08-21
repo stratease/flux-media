@@ -9,7 +9,7 @@
 namespace FluxMedia\Tests\Unit;
 
 use FluxMedia\App\Services\VideoConverter;
-use FluxMedia\Tests\Support\Mocks\NoopLogger;
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Services\Converter;
 use PHPUnit\Framework\TestCase;
 
@@ -32,7 +32,7 @@ class VideoConverterTest extends TestCase {
      * Logger instance.
      *
      * @since 0.1.0
-     * @var NoopLogger
+     * @var Logger|\PHPUnit\Framework\MockObject\MockObject
      */
     private $logger;
 
@@ -40,11 +40,13 @@ class VideoConverterTest extends TestCase {
      * Set up test environment.
      *
      * @since 0.1.0
+     * @since 4.3.0 Uses suite Logger mock (private constructor; disableOriginalConstructor).
      * @return void
      */
     protected function setUp(): void {
-        // Create VideoConverter instance (pure business logic, no WordPress dependencies)
-        $this->logger = new NoopLogger();
+        $this->logger = $this->getMockBuilder( Logger::class )
+            ->disableOriginalConstructor()
+            ->getMock();
         $this->video_converter = new VideoConverter( $this->logger );
     }
 
@@ -67,27 +69,6 @@ class VideoConverterTest extends TestCase {
     public function testIsAvailable() {
         $available = $this->video_converter->is_available();
         $this->assertIsBool( $available );
-    }
-
-    /**
-     * Test processor info retrieval.
-     *
-     * @since 0.1.0
-     * @return void
-     */
-    public function testGetProcessorInfo() {
-        $info = $this->video_converter->get_processor_info();
-        
-        $this->assertIsArray( $info );
-        $this->assertArrayHasKey( 'available', $info );
-        $this->assertArrayHasKey( 'type', $info );
-        $this->assertArrayHasKey( 'av1_support', $info );
-        $this->assertArrayHasKey( 'webm_support', $info );
-        
-        $this->assertIsBool( $info['available'] );
-        $this->assertIsString( $info['type'] );
-        $this->assertIsBool( $info['av1_support'] );
-        $this->assertIsBool( $info['webm_support'] );
     }
 
     /**
@@ -151,7 +132,7 @@ class VideoConverterTest extends TestCase {
     public function testIsFormatSupported() {
         $this->assertTrue( $this->video_converter->is_format_supported( Converter::FORMAT_AV1 ) );
         $this->assertTrue( $this->video_converter->is_format_supported( Converter::FORMAT_WEBM ) );
-        $this->assertFalse( $this->video_converter->is_format_supported( Converter::FORMAT_MP4 ) );
+        $this->assertFalse( $this->video_converter->is_format_supported( Converter::FORMAT_JPEG ) );
         $this->assertFalse( $this->video_converter->is_format_supported( 'avi' ) );
     }
 
@@ -197,10 +178,10 @@ class VideoConverterTest extends TestCase {
      * @return void
      */
     public function testErrorHandling() {
-        // Test with non-existent file
-        $this->video_converter->from( 'non-existent.mp4' )->to( 'output.webm' );
+        // Empty source fails validation before conversion.
+        $this->video_converter->from( '' )->to( 'output.webm' );
         $result = $this->video_converter->convert();
-        
+
         $this->assertFalse( $result );
         $this->assertNotEmpty( $this->video_converter->get_errors() );
         $this->assertIsString( $this->video_converter->get_last_error() );

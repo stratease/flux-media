@@ -44,6 +44,29 @@ const SettingsPage = () => {
     return systemStatus?.imageProcessor?.avif_support === true;
   };
 
+  /**
+   * Whether any reported image processor can animate HEIF sequences (FFmpeg libwebp_anim).
+   *
+   * @since 4.3.0
+   * @return {boolean}
+   */
+  const hasAnimatedHeicCapability = () => {
+    const processors = systemStatus?.imageProcessor?.processors;
+    if (!processors || typeof processors !== 'object') {
+      return false;
+    }
+    return Object.values(processors).some(
+      (processor) => processor?.animated_heic_support === true
+    );
+  };
+
+  const isWebPEnabledInSettings = () => {
+    if (settings?.image_hybrid_approach) {
+      return true;
+    }
+    return settings?.image_formats?.includes('webp') || false;
+  };
+
   const handleSettingChange = (key) => (event) => {
     let newValue;
     
@@ -168,6 +191,9 @@ const SettingsPage = () => {
               <FormHelperText>
                 {__('Creates both WebP and AVIF formats when supported by your server. Serves AVIF where supported (via <picture> tags or server detection), with WebP and the original image as fallback. This is the recommended approach for maximum performance and device compatibility. This is more dependent on theme and plugin compatibility than the native approach.', 'flux-media-optimizer')}
               </FormHelperText>
+              <FormHelperText>
+                {__('HEIC/HEIF notes: Hybrid keeps WebP enabled, so animated HEIF sequences (msf1) can become animated WebP when FFmpeg supports it. AVIF from sequences is always a static first frame. Static HEIC (typical iPhone stills) follows these same outputs; Live Photos (HEIC + MOV) are not supported.', 'flux-media-optimizer')}
+              </FormHelperText>
 
               {!settings?.image_hybrid_approach && (
                 <>
@@ -194,6 +220,14 @@ const SettingsPage = () => {
                     }
                     label={__('Enable WebP conversion', 'flux-media-optimizer')}
                   />
+                  <FormHelperText>
+                    {__('Required to preserve HEIF sequence animation as animated WebP (image format, not video). Disable WebP and animated HEIF falls back to static derivatives from your other enabled formats.', 'flux-media-optimizer')}
+                  </FormHelperText>
+                  {hasAnimatedHeicCapability() && !isWebPEnabledInSettings() && (
+                    <Alert severity="warning" sx={{ mt: 1 }}>
+                      {__('You are able to turn animated HEIF into animated WebP images. You turned WebP off in Settings, so if someone uploads an animated HEIF, the plugin will only save a still image (first frame) in whatever formats you left on (e.g. AVIF)—not an animated file.', 'flux-media-optimizer')}
+                    </Alert>
+                  )}
                   
                   <FormControlLabel
                     control={
@@ -218,6 +252,9 @@ const SettingsPage = () => {
                     }
                     label={__('Enable AVIF conversion', 'flux-media-optimizer')}
                   />
+                  <FormHelperText>
+                    {__('Applies to static HEIC/HEIF and other images. Animated HEIF sequences always become a static AVIF first frame when AVIF is enabled—AVIF does not preserve that animation.', 'flux-media-optimizer')}
+                  </FormHelperText>
                 </>
               )}
             </Stack>

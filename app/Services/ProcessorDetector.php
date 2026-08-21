@@ -26,13 +26,23 @@ class ProcessorDetector {
     private $logger;
 
     /**
+     * HEIF capability probe.
+     *
+     * @since 4.3.0
+     * @var HeifCapabilityProbe
+     */
+    private $heif_probe;
+
+    /**
      * Constructor.
      *
      * @since 0.1.0
      * @since 3.0.4 Added Logger instance for detection error logging.
+     * @since 4.3.0 Added HEIF capability probe.
      */
     public function __construct() {
         $this->logger = \FluxMedia\FluxPlugins\Common\Logger\Logger::get_instance();
+        $this->heif_probe = new HeifCapabilityProbe();
     }
 
     /**
@@ -53,6 +63,8 @@ class ProcessorDetector {
                 'webp_support' => $this->imagick_supports_webp(),
                 'avif_support' => $this->imagick_supports_avif(),
                 'animated_gif_support' => $this->imagick_supports_animated_gif(),
+                'heic_support' => $this->imagick_supports_heic(),
+                'animated_heic_support' => $this->imagick_supports_animated_heic(),
             ];
         }
 
@@ -65,6 +77,8 @@ class ProcessorDetector {
                 'webp_support' => $this->gd_supports_webp(),
                 'avif_support' => $this->gd_supports_avif(),
                 'animated_gif_support' => false, // GD cannot preserve animation.
+                'heic_support' => false,
+                'animated_heic_support' => false,
             ];
         }
 
@@ -348,6 +362,26 @@ class ProcessorDetector {
             $this->logger->info( 'Imagick GIF detection: Failed to check GIF support - ' . $e->getMessage() );
             return false;
         }
+    }
+
+    /**
+     * Check if Imagick supports static HEIC/HEIF decode.
+     *
+     * @since 4.3.0
+     * @return bool True when libheif-backed HEIC decode is available.
+     */
+    public function imagick_supports_heic() {
+        return $this->heif_probe->supports_static_heic();
+    }
+
+    /**
+     * Check if Imagick supports animated HEIC/HEIF sequence conversion.
+     *
+     * @since 4.3.0
+     * @return bool True when animated HEIC can be converted locally.
+     */
+    public function imagick_supports_animated_heic() {
+        return $this->heif_probe->supports_animated_heic( $this->imagick_supports_webp() );
     }
 
     /**

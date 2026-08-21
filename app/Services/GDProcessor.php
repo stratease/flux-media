@@ -27,6 +27,14 @@ class GDProcessor implements ImageProcessorInterface {
 	private $logger;
 
 	/**
+	 * Multi-frame detector instance.
+	 *
+	 * @since 4.3.0
+	 * @var MultiFrameDetector
+	 */
+	private $multi_frame_detector;
+
+	/**
 	 * Constructor.
 	 *
 	 * @since 0.1.0
@@ -34,6 +42,7 @@ class GDProcessor implements ImageProcessorInterface {
 	 */
 	public function __construct( Logger $logger ) {
 		$this->logger = $logger;
+		$this->multi_frame_detector = new MultiFrameDetector( $logger );
 	}
 
 	/**
@@ -55,6 +64,9 @@ class GDProcessor implements ImageProcessorInterface {
 			'png_support' => $gd_info['PNG Support'] ?? false,
 			'gif_support' => $gd_info['GIF Read Support'] ?? false,
 			'animated_gif_support' => false, // GD cannot preserve animation.
+			'multi_frame_support' => false,
+			'heic_support' => false,
+			'animated_heic_support' => false,
 		];
 	}
 
@@ -73,9 +85,9 @@ class GDProcessor implements ImageProcessorInterface {
 			return false;
 		}
 
-		// Check if this is an animated GIF and warn.
-		if ( $this->is_animated_gif( $source_path ) ) {
-			$this->logger->warning( "Animated GIF detected: {$source_path}. GD cannot preserve animation. Consider using Imagick for animated GIFs." );
+		// Check if this is a multi-frame source and warn.
+		if ( $this->is_multi_frame( $source_path ) ) {
+			$this->logger->warning( "Multi-frame source detected: {$source_path}. GD cannot preserve animation. Consider using Imagick." );
 		}
 
 		$image = $this->load_image( $source_path );
@@ -112,9 +124,9 @@ class GDProcessor implements ImageProcessorInterface {
 			return false;
 		}
 
-		// Check if this is an animated GIF and warn.
-		if ( $this->is_animated_gif( $source_path ) ) {
-			$this->logger->warning( "Animated GIF detected: {$source_path}. GD cannot preserve animation. Consider using Imagick for animated GIFs." );
+		// Check if this is a multi-frame source and warn.
+		if ( $this->is_multi_frame( $source_path ) ) {
+			$this->logger->warning( "Multi-frame source detected: {$source_path}. GD cannot preserve animation. Consider using Imagick." );
 		}
 
 		$image = $this->load_image( $source_path );
@@ -167,6 +179,27 @@ class GDProcessor implements ImageProcessorInterface {
 	}
 
 	/**
+	 * Check if processor supports multi-frame conversion.
+	 *
+	 * @since 4.3.0
+	 * @return bool
+	 */
+	public function supports_multi_frame() {
+		return false;
+	}
+
+	/**
+	 * Check if a source file contains multiple frames.
+	 *
+	 * @since 4.3.0
+	 * @param string $file_path Path to the source file.
+	 * @return bool
+	 */
+	public function is_multi_frame( $file_path ) {
+		return $this->multi_frame_detector->is_multi_frame( $file_path );
+	}
+
+	/**
 	 * Check if a GIF file is animated.
 	 *
 	 * @since TBD
@@ -174,9 +207,7 @@ class GDProcessor implements ImageProcessorInterface {
 	 * @return bool True if animated, false otherwise.
 	 */
 	public function is_animated_gif( $file_path ) {
-		// Use GifAnimationDetector for detection.
-		$detector = new GifAnimationDetector( $this->logger );
-		return $detector->is_animated( $file_path );
+		return $this->is_multi_frame( $file_path );
 	}
 
 	/**

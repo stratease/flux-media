@@ -46,12 +46,29 @@ interface ImageProcessorInterface {
     public function get_info();
 
     /**
+     * Check if processor supports multi-frame input conversion.
+     *
+     * @since 4.3.0
+     * @return bool True if processor can preserve animation across frames.
+     */
+    public function supports_multi_frame();
+
+    /**
      * Check if processor supports animated GIF conversion.
      *
      * @since TBD
      * @return bool True if processor can handle animated GIFs, false otherwise.
      */
     public function supports_animated_gif();
+
+    /**
+     * Check if a source file contains multiple frames.
+     *
+     * @since 4.3.0
+     * @param string $file_path Path to the source file.
+     * @return bool True when more than one frame is present.
+     */
+    public function is_multi_frame( $file_path );
 
     /**
      * Check if a GIF file is animated.

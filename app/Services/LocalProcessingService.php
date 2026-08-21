@@ -158,26 +158,52 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * @return void
 	 */
 	public function process_video_cron( $attachment_id, $file_path ) {
-		// Verify attachment still exists
+		$attachment_id = (int) $attachment_id;
+
 		if ( ! get_post( $attachment_id ) ) {
 			$this->logger->warning( "Video processing cron skipped: attachment {$attachment_id} no longer exists" );
+			delete_post_meta( $attachment_id, ConversionOrchestrator::META_VIDEO_DEFERRED );
 			return;
 		}
 
-		// Verify file still exists
 		if ( ! file_exists( $file_path ) ) {
-			$this->logger->warning( "Video processing cron skipped: file not found for attachment {$attachment_id}: {$file_path}" );
+			$message = "Video processing cron failed: file not found for attachment {$attachment_id}: {$file_path}";
+			$this->logger->warning( $message );
+			delete_post_meta( $attachment_id, ConversionOrchestrator::META_VIDEO_DEFERRED );
+			AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
 			return;
 		}
 
-		// Verify it's still a supported video
 		if ( ! $this->video_converter->is_supported_video( $file_path ) ) {
-			$this->logger->warning( "Video processing cron skipped: unsupported video format for attachment {$attachment_id}" );
+			$message = "Video processing cron failed: unsupported video format for attachment {$attachment_id}";
+			$this->logger->warning( $message );
+			delete_post_meta( $attachment_id, ConversionOrchestrator::META_VIDEO_DEFERRED );
+			AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
 			return;
 		}
 
-		// Process the video conversion directly via VideoConverter
-		$this->video_converter->process_video_conversion( $attachment_id, $file_path );
+		try {
+			$results = $this->video_converter->process_video_conversion( $attachment_id, $file_path );
+		} catch ( \Throwable $e ) {
+			delete_post_meta( $attachment_id, ConversionOrchestrator::META_VIDEO_DEFERRED );
+			AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $e->getMessage() );
+			$this->logger->error( "Video processing cron threw for attachment {$attachment_id}: " . $e->getMessage() );
+			return;
+		}
+
+		delete_post_meta( $attachment_id, ConversionOrchestrator::META_VIDEO_DEFERRED );
+
+		$ok = is_array( $results ) && ! empty( $results['success'] );
+		if ( ! $ok ) {
+			$errors = is_array( $results ) ? implode( ', ', $results['errors'] ?? [] ) : '';
+			AttachmentMetaHandler::mark_conversion_failed(
+				$attachment_id,
+				$errors ?: ( AttachmentMetaHandler::get_conversion_error( $attachment_id ) ?: 'Video conversion failed.' )
+			);
+			return;
+		}
+
+		AttachmentMetaHandler::mark_conversion_succeeded( $attachment_id );
 	}
 
 
@@ -203,10 +229,13 @@ class LocalProcessingService implements ProcessingServiceInterface {
 		if ( empty( $file_path ) ) {
 			$file_path = get_attached_file( $attachment_id );
 		}
-		
+
 		// Validate file path
 		if ( empty( $file_path ) || ! file_exists( $file_path ) ) {
-			$this->logger->error( "Attachment conversion failed: File not found for attachment {$attachment_id}" );
+			$this->fail_image_conversion(
+				$attachment_id,
+				"Attachment conversion failed: File not found for attachment {$attachment_id}"
+			);
 			return false;
 		}
 
@@ -222,9 +251,14 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			return false;
 		}
 
-		// Process images
-		if ( $this->image_converter->is_supported_image( $file_path ) ) {
-			return $this->process_image( $attachment_id, $file_path );
+		$optimization_source_path = $this->image_converter->get_optimization_source_path( $attachment_id );
+		if ( empty( $optimization_source_path ) || ! file_exists( $optimization_source_path ) ) {
+			$optimization_source_path = $file_path;
+		}
+
+		// Process images using the best available source (HEIC original when core converted to JPEG).
+		if ( $this->image_converter->is_supported_image( $optimization_source_path ) ) {
+			return $this->process_image( $attachment_id, $optimization_source_path );
 		}
 
 		// Process videos - always defer to cron for async processing
@@ -244,8 +278,13 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * (skips sizes already fully converted). Does not check disabled flag as explicit conversions should override.
 	 * Auto-convert checks are handled in upload hooks; this method processes if called.
 	 *
+	 * File artifacts and conversion metadata/statistics are published together after every
+	 * requested size/format succeeds. Partial failures roll back staged files without writing
+	 * new meta or tracker rows for the failed attempt.
+	 *
 	 * @since 3.0.2
 	 * @since 4.0.0 Removed auto-convert check (moved to upload hooks).
+	 * @since 4.3.0 Defer original meta and ConversionTracker writes until artifact commit succeeds.
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $file_path     File path.
 	 * @return bool True if conversion was initiated successfully, false otherwise.
@@ -257,19 +296,27 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			return false;
 		}
 
-		// Check if this is an animated GIF using ImageConverter.
-		$is_animated_gif = $this->image_converter->is_animated_gif( $attachment_id );
+		// Check if this is a multi-frame source (animated GIF, HEIF sequence, etc.).
+		$is_multi_frame = $this->image_converter->is_multi_frame_source( $attachment_id );
 
 		// Ensure metadata exists and all sizes are generated.
 		// Note: When called from process_metadata_update, metadata already exists.
 		// Only generate if called from manual conversion or other contexts.
 		$metadata = wp_get_attachment_metadata( $attachment_id );
 		if ( empty( $metadata ) || empty( $metadata['file'] ) ) {
+			$metadata_source_path = get_attached_file( $attachment_id );
+			if ( empty( $metadata_source_path ) || ! file_exists( $metadata_source_path ) ) {
+				$metadata_source_path = $file_path;
+			}
+
 			// Generate metadata if it doesn't exist (this will create all sizes).
 			// This can trigger wp_update_attachment_metadata hook again, but should_skip_processing will prevent duplicate processing.
-			$metadata = wp_generate_attachment_metadata( $attachment_id, $file_path );
+			$metadata = wp_generate_attachment_metadata( $attachment_id, $metadata_source_path );
 			if ( empty( $metadata ) ) {
-				$this->logger->error( "Failed to generate metadata for attachment {$attachment_id}" );
+				$this->fail_image_conversion(
+					$attachment_id,
+					"Failed to generate metadata for attachment {$attachment_id}"
+				);
 				return false;
 			}
 			wp_update_attachment_metadata( $attachment_id, $metadata );
@@ -277,14 +324,34 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			$metadata = wp_get_attachment_metadata( $attachment_id );
 		}
 
+		// WordPress leaves filesize-only meta when the image editor cannot decode HEIC (e.g. old libheif).
+		if ( empty( $metadata['file'] ) && empty( $metadata['width'] ) ) {
+			$decode_error = $this->describe_source_decode_failure( $file_path );
+			$this->fail_image_conversion( $attachment_id, $decode_error );
+			return false;
+		}
+
+		$extension = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+		if ( in_array( $extension, [ 'heic', 'heif', 'heics', 'heifs' ], true ) ) {
+			$heif_probe = new HeifCapabilityProbe();
+			if ( ! $heif_probe->can_decode_file( $file_path )
+				&& ! $this->image_converter->is_multi_frame_source( $attachment_id ) ) {
+				$this->fail_image_conversion(
+					$attachment_id,
+					$this->describe_source_decode_failure( $file_path )
+				);
+				return false;
+			}
+		}
+
 		// Get all image sizes for this attachment (includes full + all registered sizes).
 		$image_sizes = $this->get_all_image_paths_by_size( $attachment_id );
 		
-		// For animated GIFs, get the full-size source file path to use for all conversions.
+		// Multi-frame sources use the full-size file for all conversions to preserve animation.
 		$full_size_source_path = null;
-		if ( $is_animated_gif && isset( $image_sizes['full'] ) ) {
+		if ( $is_multi_frame && isset( $image_sizes['full'] ) ) {
 			$full_size_source_path = $image_sizes['full']['file_path'];
-			$this->logger->info( "Using full-size animated GIF as source for all size conversions: {$full_size_source_path}" );
+			$this->logger->info( "Using full-size multi-frame source for all size conversions: {$full_size_source_path}" );
 		}
 		
 		if ( empty( $image_sizes ) ) {
@@ -293,11 +360,7 @@ class LocalProcessingService implements ProcessingServiceInterface {
 		}
 
 		// Get settings and formats
-		$settings = [
-			'webp_quality' => Settings::get_webp_quality(),
-			'avif_quality' => Settings::get_avif_quality(),
-			'avif_speed' => Settings::get_avif_speed(),
-		];
+		$settings = Settings::get_image_conversion_settings();
 		$image_formats = Settings::get_image_formats();
 		
 		if ( empty( $image_formats ) ) {
@@ -389,17 +452,22 @@ class LocalProcessingService implements ProcessingServiceInterface {
 		// Track formats - will be built from actual converted files after processing
 		// This ensures we only track formats that actually exist
 
+		$artifact_tx = new ConversionArtifactTransaction();
+		$sizes_converted = 0;
+		// Queue tracker rows until staged files commit so failed attempts leave prior stats intact.
+		$pending_tracker_records = [];
+
 		// Convert each image size (full, thumbnail, medium, large, and any custom sizes)
 		foreach ( $image_sizes as $size_name => $size_data ) {
 			$size_file_path = $size_data['file_path'];
 			$size_width = $size_data['width'] ?? null;
 			$size_height = $size_data['height'] ?? null;
 			
-			// For animated GIFs, use the full-size source file instead of the static thumbnail.
+			// For multi-frame sources, use the full-size source file instead of static thumbnails.
 			$source_file_path = $size_file_path;
-			if ( $is_animated_gif && $size_name !== 'full' && $full_size_source_path ) {
+			if ( $is_multi_frame && $size_name !== 'full' && $full_size_source_path ) {
 				$source_file_path = $full_size_source_path;
-				$this->logger->info( "Using full-size animated GIF source for size '{$size_name}' conversion to preserve animation" );
+				$this->logger->info( "Using full-size multi-frame source for size '{$size_name}' conversion to preserve animation" );
 			}
 			
 			// Skip if source file doesn't exist
@@ -414,29 +482,89 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			$size_file_info = pathinfo( $size_file_path_normalized );
 			$size_file_name = $size_file_info['filename'];
 			
-			// Create destination paths for all requested formats
+			// Create destination paths for all requested formats beside the validated size path.
+			$uploads_root = UploadPathGuard::get_uploads_basedir();
+			if ( false === $uploads_root ) {
+				$this->logger->warning(
+					"Uploads directory unavailable; skipping destinations for attachment {$attachment_id}, size {$size_name}"
+				);
+				continue;
+			}
 			$destination_paths = [];
 			foreach ( $image_formats as $format ) {
-				$destination_paths[ $format ] = trailingslashit( $size_file_dir ) . $size_file_name . '.' . $format;
+				$destination = trailingslashit( $size_file_dir ) . $size_file_name . '.' . $format;
+				if ( ! UploadPathGuard::is_destination_within( $destination, $uploads_root ) ) {
+					$this->logger->warning(
+						"Skipping destination outside uploads for attachment {$attachment_id}, size {$size_name}, format {$format}: {$destination}"
+					);
+					continue;
+				}
+				$destination_paths[ $format ] = $destination;
+			}
+
+			if ( empty( $destination_paths ) ) {
+				$this->logger->warning(
+					"No safe destination paths for attachment {$attachment_id}, size {$size_name}"
+				);
+				continue;
 			}
 			
-			// Add resize dimensions to settings for animated GIFs if this is not the full size.
+			// Add resize dimensions for multi-frame sources when generating intermediate sizes.
 			$conversion_settings = $settings;
-			if ( $is_animated_gif && $size_name !== 'full' && $size_width && $size_height ) {
+			if ( $is_multi_frame && $size_name !== 'full' && $size_width && $size_height ) {
 				$conversion_settings['resize_width'] = $size_width;
 				$conversion_settings['resize_height'] = $size_height;
-				$this->logger->debug( "Adding resize dimensions for animated GIF: {$size_width}x{$size_height}" );
+				$this->logger->debug( "Adding resize dimensions for multi-frame source: {$size_width}x{$size_height}" );
 			}
 			
 			// Process this size
-			$results = $this->image_converter->process_image( $source_file_path, $destination_paths, $conversion_settings );
-			
-			if ( ! $results['success'] ) {
-				$this->logger->warning( "Image conversion failed for attachment {$attachment_id}, size {$size_name}: " . implode( ', ', $results['errors'] ?? [] ) );
-				continue;
+			// Stage beside final destinations so prior known-good files stay until commit.
+			$staging_paths = [];
+			foreach ( $destination_paths as $format => $final_path ) {
+				$staging_paths[ $format ] = $artifact_tx->stage( $final_path );
 			}
 
-			// Get file sizes for statistics tracking - use source file size for animated GIFs.
+			$results = $this->image_converter->process_image( $source_file_path, $staging_paths, $conversion_settings );
+
+			if ( ! $results['success'] ) {
+				$error_detail = implode( ', ', $results['errors'] ?? [] );
+				$artifact_tx->rollback();
+				$this->fail_image_conversion(
+					$attachment_id,
+					"Image conversion failed for attachment {$attachment_id}, size {$size_name}: {$error_detail}"
+				);
+				$this->logger->error(
+					"Atomic image conversion rolled back for attachment {$attachment_id}",
+					[
+						'attachment_id' => $attachment_id,
+						'size'          => $size_name,
+						'error'         => $error_detail,
+					]
+				);
+				return false;
+			}
+
+			// All requested formats for this size must succeed (all-or-nothing).
+			foreach ( array_keys( $destination_paths ) as $required_format ) {
+				if ( empty( $results['converted_files'][ $required_format ] ) ) {
+					$artifact_tx->rollback();
+					$this->fail_image_conversion(
+						$attachment_id,
+						"Image conversion incomplete for attachment {$attachment_id}, size {$size_name}, format {$required_format}"
+					);
+					$this->logger->error(
+						"Atomic image conversion missing format; rolled back",
+						[
+							'attachment_id' => $attachment_id,
+							'size'          => $size_name,
+							'format'        => $required_format,
+						]
+					);
+					return false;
+				}
+			}
+
+			// Get file sizes for statistics tracking - use source file size for multi-frame sources.
 			$size_original_size = $wp_filesystem->size( $source_file_path );
 			
 			// Initialize size array if needed
@@ -460,64 +588,52 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			}
 			
 			if ( $size_original_size > 0 ) {
-				// Store original file details.
-				// set_file_url_and_size() will generate URL automatically.
-				AttachmentMetaHandler::set_file_url_and_size( $attachment_id, 'original', $size_name, $original_file_url ?: $source_file_path, $size_original_size );
-				
-				// Also add to local array so it's included when we save the batch.
-				// Get the URL that was stored by set_file_url_and_size().
-				$stored_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, 'original', $size_name );
-				if ( $stored_url ) {
-					$all_converted_files_by_size[ $size_name ]['original'] = [
-						'url' => $stored_url,
-						'filesize' => $size_original_size,
-					];
-				}
+				// Accumulate original details in memory; persist only after commit.
+				$all_converted_files_by_size[ $size_name ]['original'] = [
+					'url_or_path' => $original_file_url ?: $source_file_path,
+					'filesize'    => $size_original_size,
+				];
 			}
-			
-			// Store converted files for each format
+
+			// Accumulate converted files in memory; persist meta/stats only after commit.
 			foreach ( $results['converted_formats'] as $format ) {
-				$converted_file_path = $results['converted_files'][ $format ] ?? '';
-				if ( empty( $converted_file_path ) ) {
+				$staging_path = $results['converted_files'][ $format ] ?? '';
+				$final_path   = $destination_paths[ $format ] ?? '';
+				if ( empty( $staging_path ) || empty( $final_path ) ) {
 					continue;
 				}
-				
-				// Get file size - ensure file exists and is readable
+
 				$converted_size = 0;
-				if ( $wp_filesystem->exists( $converted_file_path ) ) {
-					$converted_size = $wp_filesystem->size( $converted_file_path );
-					// Validate that we got a valid size (greater than 0)
-					if ( $converted_size <= 0 ) {
-						// Fallback to PHP filesize if wp_filesystem returns invalid size
-						if ( file_exists( $converted_file_path ) ) {
-							$converted_size = filesize( $converted_file_path );
-						}
-					}
-				} elseif ( file_exists( $converted_file_path ) ) {
-					// Fallback to PHP filesize if wp_filesystem doesn't exist but file does
-					$converted_size = filesize( $converted_file_path );
+				if ( $wp_filesystem->exists( $staging_path ) ) {
+					$converted_size = (int) $wp_filesystem->size( $staging_path );
 				}
-				
-				// Record conversion for statistics tracking (track all sizes for accurate savings calculation)
-				$this->conversion_tracker->record_conversion( $attachment_id, $format, $size_original_size, $converted_size, $size_name );
-				
-				// Store URL and size together using unified structure.
-				// Only store if we have a valid file size (greater than 0)
-				if ( $converted_size > 0 ) {
-					// set_file_url_and_size() will generate URL automatically.
-					AttachmentMetaHandler::set_file_url_and_size( $attachment_id, $format, $size_name, $converted_file_path, $converted_size );
-					
-					// Also store in local array for batch update.
-					// Get the URL that was stored by set_file_url_and_size().
-					$stored_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, $format, $size_name );
-					if ( $stored_url ) {
-						$all_converted_files_by_size[ $size_name ][ $format ] = [
-							'url' => $stored_url,
-							'filesize' => $converted_size,
-						];
-					}
+				if ( $converted_size <= 0 && file_exists( $staging_path ) ) {
+					$converted_size = (int) filesize( $staging_path );
 				}
+
+				if ( $converted_size <= 0 ) {
+					$artifact_tx->rollback();
+					$this->fail_image_conversion(
+						$attachment_id,
+						"Image conversion produced empty file for attachment {$attachment_id}, size {$size_name}, format {$format}"
+					);
+					return false;
+				}
+
+				$pending_tracker_records[] = [
+					'format'         => $format,
+					'original_size'  => $size_original_size,
+					'converted_size' => $converted_size,
+					'size_name'      => $size_name,
+				];
+
+				$all_converted_files_by_size[ $size_name ][ $format ] = [
+					'path'     => $final_path,
+					'filesize' => $converted_size,
+				];
 			}
+
+			$sizes_converted++;
 		}
 		
 		// Build final formats list - only include formats that actually exist in converted files
@@ -534,43 +650,135 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			}
 		}
 
-		// Update WordPress meta with all converted files (organized by size)
-		// Update even if we only removed disabled formats (not just when new conversions happened)
-		if ( ! empty( $all_converted_files_by_size ) || $disabled_formats_removed ) {
-			AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $all_converted_files_by_size );
-			
-			// Extract all URLs and store in dedicated meta field for efficient lookup
-			// Store ALL URLs (local and external) in META_KEY_FILE_URLS
-			$all_urls = [];
-			foreach ( $all_converted_files_by_size as $size_data ) {
-				if ( ! is_array( $size_data ) ) {
-					continue;
-				}
-				foreach ( $size_data as $format => $file_data ) {
-					if ( is_array( $file_data ) && isset( $file_data['url'] ) && is_string( $file_data['url'] ) && ! empty( $file_data['url'] ) ) {
-						// Store all URLs (local and external).
-						$all_urls[] = $file_data['url'];
-					}
-				}
-			}
-			// Store all URLs in dedicated meta field for efficient lookup
-			if ( ! empty( $all_urls ) ) {
-				AttachmentMetaHandler::set_file_urls( $attachment_id, array_unique( $all_urls ) );
-			}
-			
-			// Update formats list - only include formats that actually exist
-			AttachmentMetaHandler::set_converted_formats( $attachment_id, $final_formats );
-			
-			// Only update conversion date if we actually converted something (not just cleaned up)
-			if ( ! $disabled_formats_removed || ! empty( $all_converted_files_by_size ) ) {
-				AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
-			}
-		} else {
-			$this->logger->error( "Image conversion failed for attachment {$attachment_id}: No sizes were successfully converted" );
+		if ( empty( $all_converted_files_by_size ) && ! $disabled_formats_removed ) {
+			$artifact_tx->rollback();
+			$this->fail_image_conversion(
+				$attachment_id,
+				"Image conversion failed for attachment {$attachment_id}: No sizes were successfully converted"
+			);
 			return false;
 		}
 
+		// Publish staged files only after every requested size/format succeeded.
+		if ( $artifact_tx->has_staged() && ! $artifact_tx->commit() ) {
+			$artifact_tx->rollback();
+			$this->fail_image_conversion(
+				$attachment_id,
+				"Image conversion failed for attachment {$attachment_id}: Unable to publish staged artifacts"
+			);
+			return false;
+		}
+
+		// Persist queued conversion statistics only after files are published.
+		foreach ( $pending_tracker_records as $record ) {
+			$this->conversion_tracker->record_conversion(
+				$attachment_id,
+				$record['format'],
+				$record['original_size'],
+				$record['converted_size'],
+				$record['size_name']
+			);
+		}
+
+		// Rewrite meta URLs against final (committed) destinations, including originals.
+		foreach ( $all_converted_files_by_size as $size_name => $size_formats ) {
+			if ( ! is_array( $size_formats ) ) {
+				continue;
+			}
+			foreach ( $size_formats as $format => $file_data ) {
+				if ( ! is_array( $file_data ) ) {
+					continue;
+				}
+
+				if ( 'original' === $format ) {
+					$url_or_path = $file_data['url_or_path'] ?? '';
+					$filesize    = (int) ( $file_data['filesize'] ?? 0 );
+					if ( '' === $url_or_path || $filesize <= 0 ) {
+						continue;
+					}
+					AttachmentMetaHandler::set_file_url_and_size( $attachment_id, 'original', $size_name, $url_or_path, $filesize );
+					$stored_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, 'original', $size_name );
+					if ( $stored_url ) {
+						$all_converted_files_by_size[ $size_name ]['original'] = [
+							'url'      => $stored_url,
+							'filesize' => $filesize,
+						];
+					}
+					continue;
+				}
+
+				$final_path = $file_data['path'] ?? '';
+				if ( empty( $final_path ) || ! file_exists( $final_path ) ) {
+					continue;
+				}
+				$filesize = (int) ( $file_data['filesize'] ?? 0 );
+				AttachmentMetaHandler::set_file_url_and_size( $attachment_id, $format, $size_name, $final_path, $filesize );
+				$stored_url = AttachmentMetaHandler::get_converted_file_url( $attachment_id, $format, $size_name );
+				if ( $stored_url ) {
+					$all_converted_files_by_size[ $size_name ][ $format ] = [
+						'url'      => $stored_url,
+						'filesize' => $filesize,
+					];
+				}
+			}
+		}
+
+		AttachmentMetaHandler::set_converted_files_grouped_by_size( $attachment_id, $all_converted_files_by_size );
+
+		$all_urls = [];
+		foreach ( $all_converted_files_by_size as $size_data ) {
+			if ( ! is_array( $size_data ) ) {
+				continue;
+			}
+			foreach ( $size_data as $format => $file_data ) {
+				if ( is_array( $file_data ) && isset( $file_data['url'] ) && is_string( $file_data['url'] ) && ! empty( $file_data['url'] ) ) {
+					$all_urls[] = $file_data['url'];
+				}
+			}
+		}
+		if ( ! empty( $all_urls ) ) {
+			AttachmentMetaHandler::set_file_urls( $attachment_id, array_unique( $all_urls ) );
+		}
+
+		AttachmentMetaHandler::set_converted_formats( $attachment_id, $final_formats );
+		AttachmentMetaHandler::set_conversion_date_now( $attachment_id );
+		AttachmentMetaHandler::mark_conversion_succeeded( $attachment_id );
+
 		return true;
+	}
+
+	/**
+	 * Persist a conversion failure for Media Library status and logging.
+	 *
+	 * @since 4.3.0
+	 * @param int    $attachment_id Attachment ID.
+	 * @param string $message       Error message.
+	 * @return void
+	 */
+	private function fail_image_conversion( $attachment_id, $message ) {
+		$this->logger->error( $message );
+		AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
+	}
+
+	/**
+	 * Build a decode-failure message for an undecodable HEIC/HEIF source.
+	 *
+	 * @since 4.3.0
+	 * @param string $file_path Source path.
+	 * @return string
+	 */
+	private function describe_source_decode_failure( $file_path ) {
+		$detail = 'Imagick could not decode the HEIC/HEIF source. Modern iOS gain-map HEIC requires libheif 1.18.2 or newer.';
+
+		if ( extension_loaded( 'imagick' ) && class_exists( 'Imagick' ) && file_exists( $file_path ) ) {
+			try {
+				new \Imagick( $file_path );
+			} catch ( \Exception $e ) {
+				$detail = $e->getMessage();
+			}
+		}
+
+		return "HEIC/HEIF decode failed for {$file_path}: {$detail}";
 	}
 
 	/**
@@ -611,8 +819,8 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * @return bool True if conversion was queued successfully, false otherwise.
 	 */
 	private function process_video( $attachment_id, $file_path ) {
-		// Always enqueue video processing via cron for async processing
-		// This prevents blocking during upload or manual conversion
+		// Mark deferred so orchestrator/retry treat enqueue as in-flight, not success.
+		update_post_meta( $attachment_id, ConversionOrchestrator::META_VIDEO_DEFERRED, '1' );
 		$this->enqueue_video_processing( $attachment_id, $file_path );
 		return true;
 	}
@@ -624,66 +832,119 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * Uses WordPress filesystem API for file operations.
 	 *
 	 * @since 3.0.2
+	 * @since 4.3.0 Skip size paths that resolve outside the uploads directory.
 	 * @param int $attachment_id Attachment ID.
 	 * @return array Array of size_name => ['file_path' => path, 'width' => int, 'height' => int].
 	 */
 	private function get_all_image_paths_by_size( $attachment_id ) {
 		$sizes = [];
-		
-		// Initialize WordPress filesystem
+
+		// Initialize WordPress filesystem.
 		if ( ! function_exists( 'WP_Filesystem' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 		}
 		WP_Filesystem();
-		
+
 		global $wp_filesystem;
-		
+
 		if ( ! $wp_filesystem ) {
 			return $sizes;
 		}
-		
-		// Add full size
-		$full_file_path = get_attached_file( $attachment_id );
-		if ( $full_file_path && $wp_filesystem->exists( $full_file_path ) ) {
+
+		$uploads_root = UploadPathGuard::get_uploads_basedir();
+		if ( false === $uploads_root ) {
+			$this->logger->warning(
+				"Uploads directory unavailable while resolving image size paths for attachment {$attachment_id}"
+			);
+			return $sizes;
+		}
+
+		// Add full size using the optimization source (HEIC original when applicable).
+		$attached_file_path = get_attached_file( $attachment_id );
+		$optimization_source_path = $this->image_converter->get_optimization_source_path( $attachment_id );
+		if ( empty( $optimization_source_path ) || ! $wp_filesystem->exists( $optimization_source_path ) ) {
+			$optimization_source_path = $attached_file_path;
+		}
+
+		if (
+			$optimization_source_path
+			&& $wp_filesystem->exists( $optimization_source_path )
+			&& UploadPathGuard::is_existing_path_within( $optimization_source_path, $uploads_root )
+		) {
 			$metadata = wp_get_attachment_metadata( $attachment_id );
 			$sizes['full'] = [
-				'file_path' => wp_normalize_path( $full_file_path ),
+				'file_path' => wp_normalize_path( $optimization_source_path ),
 				'width' => $metadata['width'] ?? 0,
 				'height' => $metadata['height'] ?? 0,
 			];
+		} elseif ( $optimization_source_path ) {
+			$this->logger->warning(
+				"Skipping optimization source outside uploads for attachment {$attachment_id}: {$optimization_source_path}"
+			);
 		}
-		
-		// Get all intermediate sizes
+
+		// Get all intermediate sizes relative to the attached working copy.
+		$full_file_path = $attached_file_path;
 		$metadata = wp_get_attachment_metadata( $attachment_id );
 		if ( ! empty( $metadata['sizes'] ) && ! empty( $full_file_path ) ) {
-			// Get valid WordPress size names (includes 'thumbnail', 'medium', 'large', and custom sizes)
+			// Get valid WordPress size names (includes 'thumbnail', 'medium', 'large', and custom sizes).
 			$valid_sizes = get_intermediate_image_sizes();
-			// Add 'full' to the list of valid sizes
+			// Add 'full' to the list of valid sizes.
 			$valid_sizes[] = 'full';
-			
-			// Build directory path using PHP dirname function
+
+			// Build directory path using PHP dirname function.
 			$file_dir = dirname( wp_normalize_path( $full_file_path ) );
-			
+
 			foreach ( $metadata['sizes'] as $size_name => $size_data ) {
-				// Only process sizes that are valid WordPress registered sizes
+				// Only process sizes that are valid WordPress registered sizes.
 				if ( ! in_array( $size_name, $valid_sizes, true ) ) {
 					continue;
 				}
-				
-				// Build full path to size file using WordPress path functions
-				$size_file_path = trailingslashit( $file_dir ) . $size_data['file'];
-				$size_file_path = wp_normalize_path( $size_file_path );
-				
-				if ( $wp_filesystem->exists( $size_file_path ) ) {
-					$sizes[ $size_name ] = [
-						'file_path' => $size_file_path,
-						'width' => $size_data['width'] ?? 0,
-						'height' => $size_data['height'] ?? 0,
-					];
+
+				if ( empty( $size_data['file'] ) || ! is_string( $size_data['file'] ) ) {
+					continue;
 				}
+
+				// Only allow basename filenames; reject path segments and traversal.
+				$file_name = wp_basename( $size_data['file'] );
+				if ( $file_name !== $size_data['file'] || $file_name === '' || false !== strpos( $file_name, '..' ) ) {
+					$this->logger->warning(
+						"Skipping unsafe size filename for attachment {$attachment_id}, size {$size_name}: {$size_data['file']}"
+					);
+					continue;
+				}
+
+				$safe_name = sanitize_file_name( $file_name );
+				if ( $safe_name === '' || $safe_name !== $file_name ) {
+					$this->logger->warning(
+						"Skipping unsanitized size filename for attachment {$attachment_id}, size {$size_name}: {$size_data['file']}"
+					);
+					continue;
+				}
+
+				// Build full path to size file using WordPress path functions.
+				$size_file_path = trailingslashit( $file_dir ) . $safe_name;
+				$size_file_path = wp_normalize_path( $size_file_path );
+
+				if ( ! $wp_filesystem->exists( $size_file_path ) ) {
+					continue;
+				}
+
+				if ( ! UploadPathGuard::is_existing_path_within( $size_file_path, $uploads_root ) ) {
+					$this->logger->warning(
+						"Skipping size path outside uploads for attachment {$attachment_id}, size {$size_name}: {$size_file_path}"
+					);
+					continue;
+				}
+
+				$sizes[ $size_name ] = [
+					'file_path' => $size_file_path,
+					'width' => $size_data['width'] ?? 0,
+					'height' => $size_data['height'] ?? 0,
+				];
 			}
 		}
-		
+
 		return $sizes;
 	}
 
@@ -693,75 +954,84 @@ class LocalProcessingService implements ProcessingServiceInterface {
 	 * Handles deletion of local converted files and clears all conversion-related meta data.
 	 *
 	 * @since 3.0.0
+	 * @since 4.3.0 Refuse to delete paths that resolve outside the uploads directory.
 	 * @param int $attachment_id Attachment ID.
 	 * @return bool True if deletion was successful or not needed, false on error.
 	 */
 	public function delete_attachment( $attachment_id ) {
-		// Get converted files by size
+		// Get converted files by size.
 		$converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
-		
+
 		if ( empty( $converted_files_by_size ) ) {
-			// No converted files, nothing to delete
+			// No converted files, nothing to delete.
 			$this->logger->debug( "No converted files found for attachment {$attachment_id}, skipping local deletion" );
-			// Still clear meta in case there's stale data
+			// Still clear meta in case there's stale data.
 			AttachmentMetaHandler::clear_all_attachment_meta( $attachment_id );
 			return true;
 		}
 
-		// Initialize WordPress filesystem
+		// Initialize WordPress filesystem.
 		if ( ! function_exists( 'WP_Filesystem' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 		}
 		WP_Filesystem();
-		
+
 		global $wp_filesystem;
-		
+
 		$deleted_count = 0;
 		$total_count = 0;
 
-		// Delete local files from size-specific structure
-		$upload_dir = wp_upload_dir();
-		$base_url = $upload_dir['baseurl'];
-		$base_dir = $upload_dir['basedir'];
-		
+		// Delete local files from size-specific structure.
+		$base_url = UploadPathGuard::get_uploads_baseurl();
+		$base_dir = UploadPathGuard::get_uploads_basedir();
+		if ( false === $base_url || false === $base_dir ) {
+			$this->logger->warning(
+				"Uploads directory unavailable while deleting converted files for attachment {$attachment_id}"
+			);
+			AttachmentMetaHandler::clear_all_attachment_meta( $attachment_id );
+			return true;
+		}
+
 		foreach ( $converted_files_by_size as $size_name => $size_formats ) {
 			if ( ! is_array( $size_formats ) ) {
 				continue;
 			}
 			foreach ( $size_formats as $format => $data ) {
-				// Extract URL/path from unified structure
+				// Extract URL/path from unified structure.
 				$url_or_path = null;
 				if ( is_array( $data ) && isset( $data['url'] ) ) {
 					$url_or_path = $data['url'];
 				} elseif ( is_string( $data ) ) {
 					$url_or_path = $data;
 				}
-				
-				// Skip if invalid
+
+				// Skip if invalid.
 				if ( ! is_string( $url_or_path ) || empty( $url_or_path ) ) {
 					continue;
 				}
-				
-				// Convert URL to file path if it's a local WordPress upload URL
-				$file_path = $url_or_path;
+
+				$file_path = null;
 				if ( AttachmentMetaHandler::is_file_url( $url_or_path ) ) {
-					// Check if it's a local WordPress upload URL
-					if ( strpos( $url_or_path, $base_url ) === 0 ) {
-						// Convert URL to file path
-						$relative_path = str_replace( $base_url, '', $url_or_path );
-						$relative_path = ltrim( $relative_path, '/' );
-						$file_path = $base_dir . '/' . $relative_path;
-					} else {
-						// It's a CDN/external URL, skip deletion (only remove from meta)
+					$resolved = UploadPathGuard::local_upload_url_to_path( $url_or_path, $base_url, $base_dir );
+					if ( false === $resolved ) {
+						// CDN/external URL or unsafe local URL — skip deletion (meta cleared below).
+						continue;
+					}
+					$file_path = $resolved;
+				} else {
+					$file_path = wp_normalize_path( $url_or_path );
+					if ( ! UploadPathGuard::is_existing_path_within( $file_path, $base_dir ) ) {
+						$this->logger->warning(
+							"Refusing to delete path outside uploads for attachment {$attachment_id}: {$file_path}"
+						);
 						continue;
 					}
 				}
-				
-				// Validate file path exists before attempting deletion
+
 				if ( empty( $file_path ) || ! is_string( $file_path ) ) {
 					continue;
 				}
-				
+
 				$total_count++;
 				if ( $wp_filesystem && $wp_filesystem->exists( $file_path ) && $wp_filesystem->delete( $file_path ) ) {
 					$deleted_count++;
@@ -772,7 +1042,7 @@ class LocalProcessingService implements ProcessingServiceInterface {
 			}
 		}
 
-		// Clear all meta data (includes conversion tracking)
+		// Clear all meta data (includes conversion tracking).
 		AttachmentMetaHandler::clear_all_attachment_meta( $attachment_id );
 
 		$this->logger->info( "Deleted {$deleted_count}/{$total_count} converted files for attachment {$attachment_id}" );

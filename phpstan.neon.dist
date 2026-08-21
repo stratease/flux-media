@@ -1,0 +1,23 @@
+parameters:
+	level: 5
+	paths:
+		- app/Services/ConversionOrchestrator.php
+		- app/Services/ConversionRequest.php
+		- app/Services/ConversionDispatchResult.php
+		- app/Services/ConversionArtifactTransaction.php
+		- app/Services/ActionSchedulerGroups.php
+		- app/Services/MediaAwareRetryDelayPolicy.php
+		- app/Services/RetryDelayPolicy.php
+		- app/Services/AdminScriptUrl.php
+	excludePaths:
+		- vendor
+		- vendor-prefixed
+	bootstrapFiles:
+		- tests/phpstan-bootstrap.php
+	ignoreErrors:
+		- '#Function [a-zA-Z0-9_\\]+ not found.#'
+		- '#Constant [A-Z0-9_]+ not found.#'
+		- '#Call to static method .* on an unknown class#'
+		- '#Instantiated class .* not found.#'
+		- '#Class .* not found.#'
+		- '#Access to constant .* on an unknown class#'

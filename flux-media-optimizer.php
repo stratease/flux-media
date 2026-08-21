@@ -3,7 +3,7 @@
  * Plugin Name: Flux Media Optimizer – Image & Video Optimization by Flux Plugins
  * Plugin URI: https://fluxplugins.com/media-optimizer
  * Description: One-click image (AVIF & WebP) and video optimization for WordPress.
- * Version: 4.2.0
+ * Version: 4.3.0
  * Author: Flux Plugins
  * Author URI: https://fluxplugins.com
  * License: GPL-2.0+
@@ -29,21 +29,34 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants.
-define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.2.0' );
+define( 'FLUX_MEDIA_OPTIMIZER_VERSION', '4.3.0' );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE', __FILE__ );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_SLUG', 'flux-media-optimizer' );
 
-// Define external service URL constant (can be overridden in wp-config.php).
-if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL' ) ) {
-	define( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL', 'https://api.fluxplugins.com' );
-}
+// Align external service constants before prefixed common library constants load.
+// @since 4.3.0
+require_once __DIR__ . '/app/Services/ExternalServiceConfig.php';
+$flux_media_optimizer_external_config = \FluxMedia\App\Services\ExternalServiceConfig::resolve(
+	defined( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL' ) ? FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL : null,
+	defined( 'FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_URL' ) ? FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_URL : null,
+	defined( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_TIMEOUT' ) ? (int) FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_TIMEOUT : null,
+	defined( 'FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_TIMEOUT' ) ? (int) FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_TIMEOUT : null
+);
 
-// Define external service timeout constant (can be overridden in wp-config.php).
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_URL', $flux_media_optimizer_external_config['url'] );
+}
+if ( ! defined( 'FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_URL' ) ) {
+	define( 'FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_URL', $flux_media_optimizer_external_config['url'] );
+}
 if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_TIMEOUT' ) ) {
-	define( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_TIMEOUT', 15 );
+	define( 'FLUX_MEDIA_OPTIMIZER_EXTERNAL_SERVICE_TIMEOUT', $flux_media_optimizer_external_config['timeout'] );
+}
+if ( ! defined( 'FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_TIMEOUT' ) ) {
+	define( 'FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_TIMEOUT', $flux_media_optimizer_external_config['timeout'] );
 }
 
 /**
@@ -107,9 +120,10 @@ if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD' ) ) {
 }
 
 /**
- * Maximum failed external job retry attempts during cleanup.
+ * Maximum automatic conversion retry attempts after the initial failure.
  *
  * @since 4.2.0
+ * @since 4.3.0 Applies to unified Action Scheduler retries (local and cloud).
  */
 if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT' ) ) {
 	define( 'FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT', 3 );
@@ -355,12 +369,23 @@ register_uninstall_hook( __FILE__, 'flux_media_optimizer_uninstall' );
  * @since 4.1.5 Updated PHP version requirement check from 8.0 to 8.1.
  */
 function flux_media_optimizer_activate() {
-	// Check requirements before activation.
 	global $wp_version;
+
 	if ( version_compare( PHP_VERSION, '8.1', '<' ) || version_compare( $wp_version, '5.8', '<' ) ) {
-		return;
+		flux_media_optimizer_abort_activation(
+			esc_html__( 'Flux Media Optimizer requires PHP 8.1 or higher and WordPress 5.8 or higher.', 'flux-media-optimizer' )
+		);
 	}
 
+	if ( ! file_exists( FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR . 'vendor/autoload.php' )
+		|| ! file_exists( FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR . 'vendor-prefixed/autoload.php' ) ) {
+		flux_media_optimizer_abort_activation(
+			esc_html__( 'Flux Media Optimizer requires Composer dependencies. Please run "composer install" in the plugin directory.', 'flux-media-optimizer' )
+		);
+	}
+
+	require_once FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR . 'vendor/autoload.php';
+	require_once FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR . 'vendor-prefixed/autoload.php';
 
 	// Create database tables
 	FluxMedia\App\Services\Database::create_tables();
@@ -390,7 +415,6 @@ function flux_media_optimizer_activate() {
 function flux_media_optimizer_deactivate() {
 	// Clear scheduled WP Cron events.
 	wp_clear_scheduled_hook( 'flux_media_optimizer_cleanup' );
-	wp_clear_scheduled_hook( 'flux_media_optimizer_retry_failed_jobs' );
 	// Note: Bulk conversion now uses Action Scheduler, which handles its own cleanup
 
 	// Note: We don't drop tables on deactivation to preserve data
@@ -398,10 +422,32 @@ function flux_media_optimizer_deactivate() {
 }
 
 /**
+ * Deactivate plugin during activation when requirements are not met.
+ *
+ * @since 4.2.1
+ * @param string $message User-facing error message.
+ * @return void
+ */
+function flux_media_optimizer_abort_activation( $message ) {
+	if ( ! function_exists( 'deactivate_plugins' ) ) {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+
+	deactivate_plugins( plugin_basename( FLUX_MEDIA_OPTIMIZER_PLUGIN_FILE ) );
+
+	wp_die(
+		$message,
+		esc_html__( 'Plugin Activation Error', 'flux-media-optimizer' ),
+		[ 'back_link' => true ]
+	);
+}
+
+/**
  * Plugin uninstall handler.
  *
  * @since 2.0.1
- * @since 3.0.0 Added WP_UNINSTALL_PLUGIN security check and account ID cleanup for privacy compliance.
+ * @since 3.0.0 Added WP_UNINSTALL_PLUGIN security check.
+ * @since 4.2.1 Removes correct option keys; preserves shared flux-plugins_account_id for other suite plugins.
  */
 function flux_media_optimizer_uninstall() {
 	defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
@@ -411,28 +457,17 @@ function flux_media_optimizer_uninstall() {
 	// Initialize WordPress filesystem.
 	WP_Filesystem();
 
-	// Remove custom database tables.
-	$tables = [
-		$wpdb->prefix . 'flux_media_optimizer_conversions',
-		$wpdb->prefix . 'flux_media_optimizer_logs',
-		$wpdb->prefix . 'flux_media_optimizer_settings',
-	];
-
-	foreach ( $tables as $table ) {
-		// Compatibility: avoid %i placeholder so uninstall works on older WordPress versions.
-		// Safety: table names are derived from known constants and validated to identifier chars.
-		if ( preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) {
-			$wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-		}
+	if ( file_exists( FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
+		require_once FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR . 'vendor/autoload.php';
 	}
 
-	// Remove plugin options.
-	$options = [
-		'flux_media_optimizer_settings',
-		'flux_media_optimizer_version',
-		'flux_media_optimizer_activation_redirect',
-		'flux-plugins_account_id',
-	];
+	if ( class_exists( 'FluxMedia\App\Services\Database' ) ) {
+		FluxMedia\App\Services\Database::drop_tables();
+	}
+
+	$options = class_exists( 'FluxMedia\App\Services\Settings' )
+		? FluxMedia\App\Services\Settings::get_uninstall_option_names()
+		: [ 'flux_media_optimizer_options' ];
 
 	foreach ( $options as $option ) {
 		delete_option( $option );
@@ -469,7 +504,6 @@ function flux_media_optimizer_uninstall() {
 
 	// Clear any scheduled WP Cron jobs.
 	wp_clear_scheduled_hook( 'flux_media_optimizer_cleanup' );
-	wp_clear_scheduled_hook( 'flux_media_optimizer_retry_failed_jobs' );
 	// Note: Action Scheduler actions are automatically cleaned up by Action Scheduler
 
 	// Remove any transients.

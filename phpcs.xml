@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<ruleset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="Flux Media Optimizer" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/squizlabs/PHP_CodeSniffer/master/phpcs.xsd">
+	<description>PHPCS configuration for the Flux Media Optimizer plugin.</description>
+
+	<file>flux-media-optimizer.php</file>
+	<file>app</file>
+	<file>tests</file>
+
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/vendor-prefixed/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*/tests/wordpress/*</exclude-pattern>
+
+	<rule ref="WordPress">
+		<!-- PSR-4 class filenames and modern PHP short arrays are intentional. -->
+		<exclude name="WordPress.Files.FileName"/>
+		<exclude name="Generic.Arrays.DisallowShortArraySyntax"/>
+	</rule>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="flux-media-optimizer"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

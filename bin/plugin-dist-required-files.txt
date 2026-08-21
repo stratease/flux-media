@@ -1,0 +1,10 @@
+# Required runtime artifacts for WordPress.org distribution verification.
+# One relative path per line. Used by flux-plugins-common verify-plugin-distribution.sh.
+assets/js/dist/admin.bundle.js
+assets/js/dist/attachment.bundle.js
+assets/js/dist/images/cropped-flux-icon-rounded-square.webp
+src/assets/common/js/dist/license-page.bundle.js
+src/assets/common/js/dist/logs-page.bundle.js
+src/assets/common/js/dist/compatibility-dismiss.bundle.js
+src/assets/common/js/dist/images/cropped-flux-icon-rounded-square.webp
+assets/fixtures/heif-sequence-probe.heif

@@ -16,6 +16,10 @@ use FluxMedia\App\Services\ImagickProcessor;
 use FluxMedia\App\Services\FormatSupportDetector;
 use FluxMedia\App\Services\ProcessorDetector;
 use FluxMedia\App\Services\ProcessorTypes;
+use FluxMedia\App\Services\SourceFormatRegistry;
+use FluxMedia\App\Services\MultiFrameDetector;
+use FluxMedia\App\Services\SourceImageContext;
+use FluxMedia\App\Services\AttachmentSourcePathResolver;
 
 /**
  * Image conversion service that handles WebP and AVIF conversion.
@@ -49,12 +53,36 @@ class ImageConverter implements Converter {
     private $processor_detector;
 
     /**
-     * GIF animation detector instance.
+     * Multi-frame detector instance.
      *
-     * @since TBD
-     * @var GifAnimationDetector
+     * @since 4.3.0
+     * @var MultiFrameDetector
      */
-    private $gif_detector;
+    private $multi_frame_detector;
+
+    /**
+     * HEIF sequence animation vs static first-frame policy.
+     *
+     * @since 4.3.0
+     * @var HeifAnimationPolicy
+     */
+    private $heif_animation_policy;
+
+    /**
+     * Supported input format registry.
+     *
+     * @since 4.3.0
+     * @var SourceFormatRegistry
+     */
+    private $source_format_registry;
+
+    /**
+     * Attachment source path resolver.
+     *
+     * @since 4.3.0
+     * @var AttachmentSourcePathResolver
+     */
+    private $source_path_resolver;
 
     /**
      * Available image processors.
@@ -76,6 +104,8 @@ class ImageConverter implements Converter {
         'image/png',
         'image/gif',
         'image/webp',
+        'image/heic',
+        'image/heif',
     ];
 
     /**
@@ -111,6 +141,14 @@ class ImageConverter implements Converter {
     private $errors = [];
 
     /**
+     * Last conversion error from convert_to_webp / convert_to_avif.
+     *
+     * @since 4.3.0
+     * @var string
+     */
+    private $last_conversion_error = '';
+
+    /**
      * Constructor.
      *
      * @since 0.1.0
@@ -120,7 +158,10 @@ class ImageConverter implements Converter {
         $this->logger = $logger;
         $this->processor_detector = new ProcessorDetector();
         $this->format_detector = new FormatSupportDetector( $this->processor_detector );
-        $this->gif_detector = new GifAnimationDetector( $logger );
+        $this->multi_frame_detector = new MultiFrameDetector( $logger );
+        $this->heif_animation_policy = new HeifAnimationPolicy();
+        $this->source_format_registry = new SourceFormatRegistry();
+        $this->source_path_resolver = new AttachmentSourcePathResolver( $logger, $this->source_format_registry, $this->multi_frame_detector );
         $this->available_processors = $this->initialize_processors();
     }
 
@@ -190,27 +231,46 @@ class ImageConverter implements Converter {
 	 * @return ImageProcessorInterface|null Best processor or null if none available.
 	 */
 	private function processor_for_format( $format, $source_path = null ) {
-		// Check if source is an animated GIF - if so, force Imagick usage.
-		if ( $source_path && $this->gif_detector->is_animated( $source_path ) ) {
+		$context = $source_path ? $this->build_source_context( $source_path ) : null;
+
+		if ( $context && $context->is_multi_frame() ) {
+			// HEIF sequences: Animated WebP is handled in convert_to_webp via FFmpeg when
+			// HeifAnimationPolicy allows it. Here Imagick is used for static first-frame
+			// WebP/AVIF fallback (and for GIF multi-frame sources).
 			if ( isset( $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
 				$imagick = $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ];
 				$processor_info = $imagick->get_info();
-				
-				// Check if Imagick supports the target format and animated GIFs.
+
 				if ( ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) ||
 					 ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) ) {
-					if ( $processor_info['animated_gif_support'] ?? false ) {
-						$this->logger->debug( "Using Imagick for animated GIF conversion to {$format}" );
+					if ( $processor_info['multi_frame_support'] ?? $processor_info['animated_gif_support'] ?? false ) {
+						$this->logger->debug( "Using Imagick for multi-frame conversion to {$format}" );
 						return $imagick;
 					}
 				}
-				
-				// If animated GIF but Imagick doesn't support it, log warning.
-				$this->logger->warning( "Animated GIF detected but Imagick does not support animated GIF conversion. Conversion may fail or lose animation." );
+
+				$this->logger->warning( "Multi-frame source detected but Imagick does not support multi-frame conversion. Conversion may fail or lose animation." );
 			} else {
-				$this->logger->error( "Animated GIF detected but Imagick is not available. GD cannot preserve animation." );
+				$this->logger->error( 'Multi-frame source detected but Imagick is not available. GD cannot preserve animation.' );
 				return null;
 			}
+		}
+
+		if ( $context && $context->requires_imagick() ) {
+			if ( isset( $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ] ) ) {
+				$imagick = $this->available_processors[ ProcessorTypes::IMAGE_IMAGICK ];
+				$processor_info = $imagick->get_info();
+
+				if ( Converter::FORMAT_WEBP === $format && ( $processor_info['webp_support'] ?? false ) ) {
+					return $imagick;
+				}
+				if ( Converter::FORMAT_AVIF === $format && ( $processor_info['avif_support'] ?? false ) ) {
+					return $imagick;
+				}
+			}
+
+			$this->logger->error( "HEIC/HEIF source requires Imagick with libheif support for {$format} conversion." );
+			return null;
 		}
 		
 		// Prefer Imagick for better quality and more features
@@ -252,9 +312,27 @@ class ImageConverter implements Converter {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_webp( $source_path, $destination_path, $options = [] ) {
+		if ( $this->multi_frame_detector->is_heif_sequence( $source_path )
+			&& $this->should_convert_heif_sequence_to_animated_webp( $options ) ) {
+			$sequence_converter = new HeifSequenceConverter( $this->logger );
+			$result             = $sequence_converter->convert_to_animated_webp( $source_path, $destination_path, $options );
+			if ( ! $result ) {
+				$this->last_conversion_error = 'FFmpeg animated WebP conversion failed for HEIF sequence.';
+				$this->logger->error( $this->last_conversion_error . " Source: {$source_path}" );
+				// Fall through to static first-frame WebP when animation encode fails.
+			} else {
+				return true;
+			}
+		} elseif ( $this->multi_frame_detector->is_heif_sequence( $source_path ) ) {
+			$this->logger->info(
+				"HEIF sequence detected; writing static WebP (first frame) because animated WebP is not available or WebP output is disabled: {$source_path}"
+			);
+		}
+
 		$processor = $this->processor_for_format( Converter::FORMAT_WEBP, $source_path );
 		if ( ! $processor ) {
-			$this->logger->error( 'No image processor available for WebP conversion' );
+			$this->last_conversion_error = 'No image processor available for WebP conversion';
+			$this->logger->error( $this->last_conversion_error );
 			return false;
 		}
 
@@ -262,14 +340,37 @@ class ImageConverter implements Converter {
 			$result = $processor->convert_to_webp( $source_path, $destination_path, $options );
 			
 			if ( ! $result ) {
-				$this->logger->error( "WebP conversion failed for: {$source_path}" );
+				$this->last_conversion_error = "WebP conversion failed for: {$source_path}";
+				$this->logger->error( $this->last_conversion_error );
 			}
 
 			return $result;
 		} catch ( \Exception $e ) {
-			$this->logger->error( "WebP conversion error for {$source_path}: {$e->getMessage()}" );
+			$this->last_conversion_error = "WebP conversion error for {$source_path}: {$e->getMessage()}";
+			$this->logger->error( $this->last_conversion_error );
 			return false;
 		}
+	}
+
+	/**
+	 * Whether a HEIF sequence should be encoded as animated WebP.
+	 *
+	 * Requires WebP (or hybrid) enabled in settings and FFmpeg libwebp_anim.
+	 *
+	 * @since 4.3.0
+	 * @param array $options Conversion options (may include image_hybrid_approach).
+	 * @return bool
+	 */
+	private function should_convert_heif_sequence_to_animated_webp( array $options ) {
+		$image_formats   = Settings::get_image_formats();
+		$hybrid_approach = (bool) ( $options['image_hybrid_approach'] ?? Settings::is_image_hybrid_approach_enabled() );
+		$sequence_converter = new HeifSequenceConverter( $this->logger );
+
+		return $this->heif_animation_policy->should_use_animated_webp(
+			is_array( $image_formats ) ? $image_formats : [],
+			$sequence_converter->is_available(),
+			$hybrid_approach
+		);
 	}
 
 	/**
@@ -282,9 +383,16 @@ class ImageConverter implements Converter {
 	 * @return bool True on success, false on failure.
 	 */
 	public function convert_to_avif( $source_path, $destination_path, $options = [] ) {
+		if ( $this->multi_frame_detector->is_heif_sequence( $source_path ) ) {
+			$this->logger->warning(
+				"HEIF sequence detected; writing static AVIF (first frame) because animated AVIF is unavailable for: {$source_path}"
+			);
+		}
+
 		$processor = $this->processor_for_format( Converter::FORMAT_AVIF, $source_path );
 		if ( ! $processor ) {
-			$this->logger->error( 'No image processor available for AVIF conversion' );
+			$this->last_conversion_error = 'No image processor available for AVIF conversion';
+			$this->logger->error( $this->last_conversion_error );
 			return false;
 		}
 
@@ -292,12 +400,14 @@ class ImageConverter implements Converter {
 			$result = $processor->convert_to_avif( $source_path, $destination_path, $options );
 			
 			if ( ! $result ) {
-				$this->logger->error( "AVIF conversion failed for: {$source_path}" );
+				$this->last_conversion_error = "AVIF conversion failed for: {$source_path}";
+				$this->logger->error( $this->last_conversion_error );
 			}
 
 			return $result;
 		} catch ( \Exception $e ) {
-			$this->logger->error( "AVIF conversion error for {$source_path}: {$e->getMessage()}" );
+			$this->last_conversion_error = "AVIF conversion error for {$source_path}: {$e->getMessage()}";
+			$this->logger->error( $this->last_conversion_error );
 			return false;
 		}
 	}
@@ -310,9 +420,54 @@ class ImageConverter implements Converter {
 	 * @return bool True if supported, false otherwise.
 	 */
 	public function is_supported_image( $file_path ) {
+		if ( ! $this->source_format_registry->is_supported_path( $file_path ) ) {
+			return false;
+		}
+
 		$extension = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
-		$supported_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-		return in_array( $extension, $supported_extensions, true );
+		if ( ! $this->source_format_registry->requires_imagick( $extension ) ) {
+			return true;
+		}
+
+		return $this->processor_detector->imagick_supports_heic();
+	}
+
+	/**
+	 * Build a source image context for a file path.
+	 *
+	 * @since 4.3.0
+	 * @param string $file_path Source file path.
+	 * @return SourceImageContext|null
+	 */
+	public function build_source_context( $file_path ) {
+		return $this->multi_frame_detector->build_context( $file_path, $this->source_format_registry );
+	}
+
+	/**
+	 * Check if an attachment contains a multi-frame image source.
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool
+	 */
+	public function is_multi_frame_source( $attachment_id ) {
+		$file_path = $this->source_path_resolver->get_optimization_source_path( $attachment_id );
+		if ( ! $file_path || ! file_exists( $file_path ) ) {
+			return false;
+		}
+
+		return $this->multi_frame_detector->is_multi_frame( $file_path );
+	}
+
+	/**
+	 * Get the optimization input path for an attachment.
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return string|false
+	 */
+	public function get_optimization_source_path( $attachment_id ) {
+		return $this->source_path_resolver->get_optimization_source_path( $attachment_id );
 	}
 
 	/**
@@ -323,19 +478,7 @@ class ImageConverter implements Converter {
 	 * @return bool True if animated GIF, false otherwise.
 	 */
 	public function is_animated_gif( $attachment_id ) {
-		$file_path = get_attached_file( $attachment_id );
-		if ( ! $file_path || ! file_exists( $file_path ) ) {
-			return false;
-		}
-
-		// Check MIME type first.
-		$mime_type = get_post_mime_type( $attachment_id );
-		if ( $mime_type !== 'image/gif' ) {
-			return false;
-		}
-
-		// Use GifAnimationDetector to check if animated.
-		return $this->gif_detector->is_animated( $file_path );
+		return $this->is_multi_frame_source( $attachment_id );
 	}
 
 	/**
@@ -466,8 +609,10 @@ class ImageConverter implements Converter {
 		// Use settings as provided by caller
 
 		// Process based on settings
-		if ( $settings['image_hybrid_approach'] && isset( $destination_paths[ Converter::FORMAT_WEBP ] ) && isset( $destination_paths[ Converter::FORMAT_AVIF ] ) ) {
+		$use_hybrid_approach = (bool) ( $settings['image_hybrid_approach'] ?? false );
+		if ( $use_hybrid_approach && isset( $destination_paths[ Converter::FORMAT_WEBP ] ) && isset( $destination_paths[ Converter::FORMAT_AVIF ] ) ) {
 			// Hybrid approach - create both WebP and AVIF
+			$this->last_conversion_error = '';
 			$conversion_results = $this->convert_hybrid(
 				$source_path,
 				$destination_paths[ Converter::FORMAT_WEBP ],
@@ -478,15 +623,21 @@ class ImageConverter implements Converter {
 			if ( $conversion_results[ Converter::FORMAT_WEBP ] ) {
 				$results['converted_formats'][] = Converter::FORMAT_WEBP;
 				$results['converted_files'][ Converter::FORMAT_WEBP ] = $destination_paths[ Converter::FORMAT_WEBP ];
+			} elseif ( '' !== $this->last_conversion_error ) {
+				$results['errors'][] = $this->last_conversion_error;
 			}
+
 			if ( $conversion_results[ Converter::FORMAT_AVIF ] ) {
 				$results['converted_formats'][] = Converter::FORMAT_AVIF;
 				$results['converted_files'][ Converter::FORMAT_AVIF ] = $destination_paths[ Converter::FORMAT_AVIF ];
+			} elseif ( '' !== $this->last_conversion_error ) {
+				$results['errors'][] = $this->last_conversion_error;
 			}
 
 		} else {
 			// Individual format conversion
 			foreach ( $destination_paths as $format => $destination_path ) {
+				$this->last_conversion_error = '';
 				$success = false;
 				if ( Converter::FORMAT_WEBP === $format ) {
 					$success = $this->convert_to_webp( $source_path, $destination_path, $settings );
@@ -497,6 +648,10 @@ class ImageConverter implements Converter {
 				if ( $success ) {
 					$results['converted_formats'][] = $format;
 					$results['converted_files'][ $format ] = $destination_path;
+				} elseif ( '' !== $this->last_conversion_error ) {
+					$results['errors'][] = $this->last_conversion_error;
+				} else {
+					$results['errors'][] = strtoupper( $format ) . ' conversion failed for: ' . $source_path;
 				}
 			}
 		}

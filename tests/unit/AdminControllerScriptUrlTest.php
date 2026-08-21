@@ -11,9 +11,15 @@ use PHPUnit\Framework\TestCase;
 final class AdminControllerScriptUrlTest extends TestCase {
 
 	public function test_admin_controller_sources_contain_no_hardcoded_localhost_dev_port(): void {
-		$path = dirname( __DIR__, 2 ) . '/app/Http/Controllers/AdminController.php';
-		$this->assertFileExists( $path );
-		$src = (string) file_get_contents( $path );
-		$this->assertStringNotContainsString( 'localhost:3000', $src );
+		$paths = [
+			dirname( __DIR__, 2 ) . '/app/Http/Controllers/AdminController.php',
+			dirname( __DIR__, 2 ) . '/app/Services/AdminScriptUrl.php',
+			dirname( __DIR__, 2 ) . '/app/Plugin.php',
+		];
+		foreach ( $paths as $path ) {
+			$this->assertFileExists( $path );
+			$src = (string) file_get_contents( $path );
+			$this->assertStringNotContainsString( 'localhost:3000', $src, $path );
+		}
 	}
 }

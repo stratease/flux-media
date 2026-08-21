@@ -184,15 +184,16 @@ class Settings {
 			'video_av1_cpu_used' => [ 'type' => 'int', 'min' => 0, 'max' => 8 ],
 			'video_webm_speed' => [ 'type' => 'int', 'min' => 0, 'max' => 9 ],
 			
-			// Boolean settings
+			// Boolean settings.
 			'image_auto_convert' => [ 'type' => 'bool' ],
 			'video_auto_convert' => [ 'type' => 'bool' ],
 			'image_hybrid_approach' => [ 'type' => 'bool' ],
 			'video_hybrid_approach' => [ 'type' => 'bool' ],
 			'bulk_conversion_enabled' => [ 'type' => 'bool' ],
 			'enable_logging' => [ 'type' => 'bool' ],
-			
-			// Enum/whitelist settings
+			'external_service_enabled' => [ 'type' => 'bool' ],
+
+			// Enum/whitelist settings.
 			'log_level' => [
 				'type' => 'enum',
 				'options' => [ 'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency' ],
@@ -240,8 +241,8 @@ class Settings {
 				return $value;
 				
 			case 'bool':
-				return (bool) $value;
-				
+				return self::sanitize_boolean( $value );
+
 			case 'string':
 				return sanitize_text_field( $value );
 				
@@ -268,6 +269,33 @@ class Settings {
 	}
 
 	/**
+	 * Sanitize a value as a WordPress-compatible boolean.
+	 *
+	 * Treats string forms such as "false", "0", "no", and "off" as false so REST
+	 * and form payloads cannot accidentally keep cloud processing enabled.
+	 *
+	 * @since 4.3.0
+	 * @param mixed $value Raw setting value.
+	 * @return bool Sanitized boolean.
+	 */
+	private static function sanitize_boolean( $value ) {
+		if ( is_bool( $value ) ) {
+			return $value;
+		}
+
+		if ( is_int( $value ) || is_float( $value ) ) {
+			return (bool) $value;
+		}
+
+		if ( is_string( $value ) ) {
+			$filtered = filter_var( $value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE );
+			return null === $filtered ? false : $filtered;
+		}
+
+		return (bool) $value;
+	}
+
+	/**
 	 * Sanitize value by its PHP type (fallback for unknown settings).
 	 *
 	 * @since 2.0.5
@@ -282,7 +310,7 @@ class Settings {
 			return absint( $value );
 		}
 		if ( is_bool( $value ) ) {
-			return (bool) $value;
+			return self::sanitize_boolean( $value );
 		}
 		if ( is_array( $value ) ) {
 			$sanitized = [];
@@ -387,6 +415,23 @@ class Settings {
 	 */
 	public static function get_avif_speed() {
 		return (int) self::get( 'image_avif_speed', self::DEFAULT_AVIF_SPEED );
+	}
+
+	/**
+	 * Get image conversion settings for ImageConverter callers.
+	 *
+	 * Single source of truth for quality and hybrid approach flags passed into process_image().
+	 *
+	 * @since 4.3.0
+	 * @return array{webp_quality: int, avif_quality: int, avif_speed: int, image_hybrid_approach: bool}
+	 */
+	public static function get_image_conversion_settings() {
+		return [
+			'webp_quality'          => self::get_webp_quality(),
+			'avif_quality'          => self::get_avif_quality(),
+			'avif_speed'            => self::get_avif_speed(),
+			'image_hybrid_approach' => self::is_image_hybrid_approach_enabled(),
+		];
 	}
 
 	/**
@@ -553,6 +598,33 @@ class Settings {
 	}
 
 	/**
+	 * WordPress option name for plugin settings.
+	 *
+	 * @since 4.2.1
+	 * @return string Option name stored in wp_options.
+	 */
+	public static function get_options_option_name() {
+		return self::$option_name;
+	}
+
+	/**
+	 * Option names removed during plugin uninstall.
+	 *
+	 * Does not include shared suite options such as flux-plugins_account_id.
+	 *
+	 * @since 4.2.1
+	 * @return string[]
+	 */
+	public static function get_uninstall_option_names() {
+		return [
+			self::$option_name,
+			'flux_media_optimizer_version',
+			'flux_media_optimizer_db_version',
+			'flux_media_optimizer_activation_redirect',
+		];
+	}
+
+	/**
 	 * Check if external service is enabled.
 	 *
 	 * External service cannot be enabled without a license key.
@@ -562,12 +634,15 @@ class Settings {
 	 * @return bool True if external service is enabled and license key exists.
 	 */
 	public static function is_external_service_enabled() {
-		$enabled = (bool) self::get( 'external_service_enabled', self::DEFAULT_EXTERNAL_SERVICE_ENABLED );
-		
+		// Re-sanitize on read so legacy string "false" options cannot coerce to true.
+		$enabled = self::sanitize_boolean(
+			self::get( 'external_service_enabled', self::DEFAULT_EXTERNAL_SERVICE_ENABLED )
+		);
+
 		// Use common library LicenseService instead.
 		$license_service = LicenseService::get_instance();
 		$has_license = ! empty( $license_service->get_license_key() );
-		
+
 		// External service cannot be enabled without a license key.
 		return $enabled && $has_license;
 	}
@@ -576,11 +651,30 @@ class Settings {
 	 * Set external service enabled state.
 	 *
 	 * @since 3.0.0
-	 * @param bool $enabled Whether external service is enabled.
+	 * @since 4.3.0 Passes through schema boolean sanitization instead of bare casting.
+	 * @param mixed $enabled Whether external service is enabled.
 	 * @return bool True on success, false on failure.
 	 */
 	public static function set_external_service_enabled( $enabled ) {
-		return self::set( 'external_service_enabled', (bool) $enabled );
+		return self::set( 'external_service_enabled', $enabled );
+	}
+
+	/**
+	 * Whether outbound Flux cloud processing is active for this site.
+	 *
+	 * Requires external service enabled (setting + license key) and a valid license.
+	 *
+	 * @since 4.2.1
+	 * @return bool True when SaaS processing, webhooks, and cleanup should run.
+	 */
+	public static function is_external_processing_active() {
+		if ( ! self::is_external_service_enabled() ) {
+			return false;
+		}
+
+		$license_service = LicenseService::get_instance();
+
+		return $license_service->is_license_valid();
 	}
 
 	/**
@@ -592,13 +686,7 @@ class Settings {
 	 * @return bool True if webhook route should be registered.
 	 */
 	public static function should_register_webhook_route() {
-		if ( ! self::is_external_service_enabled() ) {
-			return false;
-		}
-
-		$license_service = LicenseService::get_instance();
-
-		return $license_service->is_license_valid();
+		return self::is_external_processing_active();
 	}
 
 }

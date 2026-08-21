@@ -73,10 +73,30 @@ class AttachmentMetaHandler {
 	/**
 	 * Meta key for external job retry attempt count.
 	 *
+	 * Legacy key retained for migration into META_KEY_RETRY_COUNT.
+	 *
 	 * @since 4.2.0
 	 * @var string
 	 */
 	const META_KEY_EXTERNAL_JOB_RETRY_COUNT = '_flux_media_optimizer_external_job_retry_count';
+
+	/**
+	 * Meta key for unified conversion retry attempt count.
+	 *
+	 * Counts automatic Action Scheduler retries after the initial failure.
+	 *
+	 * @since 4.3.0
+	 * @var string
+	 */
+	const META_KEY_RETRY_COUNT = '_flux_media_optimizer_retry_count';
+
+	/**
+	 * Action fired after a conversion is marked failed.
+	 *
+	 * @since 4.3.0
+	 * @var string
+	 */
+	const ACTION_CONVERSION_FAILED = 'flux_media_optimizer_conversion_failed';
 
 	/**
 	 * In-flight external job states.
@@ -85,6 +105,31 @@ class AttachmentMetaHandler {
 	 * @var string[]
 	 */
 	private const IN_FLIGHT_JOB_STATES = [ 'queued', 'processing' ];
+
+	/**
+	 * Get in-flight external job state values.
+	 *
+	 * @since 4.2.1
+	 * @return string[]
+	 */
+	public static function get_in_flight_job_states() {
+		return self::IN_FLIGHT_JOB_STATES;
+	}
+
+	/**
+	 * Whether a job state represents an in-flight external job.
+	 *
+	 * @since 4.2.1
+	 * @param string|null $state Job state value.
+	 * @return bool True when queued or processing.
+	 */
+	public static function is_in_flight_job_state( $state ) {
+		if ( ! is_string( $state ) || '' === $state ) {
+			return false;
+		}
+
+		return in_array( $state, self::IN_FLIGHT_JOB_STATES, true );
+	}
 
 	/**
 	 * Meta key for file URLs.
@@ -110,6 +155,14 @@ class AttachmentMetaHandler {
 	 * @var string
 	 */
 	const META_KEY_CONVERTED_FILES_BY_SIZE = '_flux_media_optimizer_converted_files_by_size';
+
+	/**
+	 * Meta key for the last local/external conversion error message.
+	 *
+	 * @since 4.3.0
+	 * @var string
+	 */
+	const META_KEY_CONVERSION_ERROR = '_flux_media_optimizer_conversion_error';
 
 
 	/**
@@ -432,9 +485,142 @@ class AttachmentMetaHandler {
 		self::delete_external_job_lifecycle_meta( $attachment_id );
 		self::delete_file_urls( $attachment_id );
 		self::delete_converted_files_grouped_by_size( $attachment_id );
+		self::clear_conversion_failure( $attachment_id );
 
 		// Clear conversion tracking data (database table)
 		\FluxMedia\App\Services\ConversionTracker::delete_attachment_conversions( $attachment_id );
+	}
+
+	/**
+	 * Get the last conversion error message for an attachment.
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return string Empty string when unset.
+	 */
+	public static function get_conversion_error( $attachment_id ) {
+		$error = get_post_meta( $attachment_id, self::META_KEY_CONVERSION_ERROR, true );
+		return is_string( $error ) ? $error : '';
+	}
+
+	/**
+	 * Mark an attachment conversion as failed for Media Library status.
+	 *
+	 * Stores the error message and sets job state to failed so status derives as Failed
+	 * for both local and external processing paths. Fires ACTION_CONVERSION_FAILED so
+	 * ConversionRetryService can schedule automatic retries.
+	 *
+	 * @since 4.3.0
+	 * @param int    $attachment_id Attachment ID.
+	 * @param string $message       Human-readable error message.
+	 * @return void
+	 */
+	public static function mark_conversion_failed( $attachment_id, $message ) {
+		$attachment_id = (int) $attachment_id;
+		$message       = is_string( $message ) ? trim( $message ) : '';
+		if ( $attachment_id <= 0 ) {
+			return;
+		}
+
+		if ( '' === $message ) {
+			$message = 'Conversion failed.';
+		}
+
+		update_post_meta( $attachment_id, self::META_KEY_CONVERSION_ERROR, $message );
+		self::set_external_job_state( $attachment_id, 'failed' );
+
+		/**
+		 * Fires after conversion failure meta is persisted.
+		 *
+		 * @since 4.3.0
+		 * @param int    $attachment_id Attachment ID.
+		 * @param string $message       Failure message.
+		 */
+		do_action( self::ACTION_CONVERSION_FAILED, $attachment_id, $message );
+	}
+
+	/**
+	 * Clear conversion failure markers after a successful conversion or reset.
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return void
+	 */
+	public static function clear_conversion_failure( $attachment_id ) {
+		delete_post_meta( $attachment_id, self::META_KEY_CONVERSION_ERROR );
+
+		if ( 'failed' === self::get_external_job_state( $attachment_id ) ) {
+			self::delete_external_job_state( $attachment_id );
+		}
+	}
+
+	/**
+	 * Mark terminal conversion success: clear failure state and reset retry count.
+	 *
+	 * Lifecycle SSOT for completed conversions (local image success and video cron completion).
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return void
+	 */
+	public static function mark_conversion_succeeded( $attachment_id ) {
+		$attachment_id = (int) $attachment_id;
+		if ( $attachment_id <= 0 ) {
+			return;
+		}
+
+		self::clear_conversion_failure( $attachment_id );
+		self::reset_retry_count( $attachment_id );
+	}
+
+	/**
+	 * Get unified retry count, migrating legacy external meta when needed.
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return int Retry count (0 if not set).
+	 */
+	public static function get_retry_count( $attachment_id ) {
+		$attachment_id = (int) $attachment_id;
+		$retry_count   = get_post_meta( $attachment_id, self::META_KEY_RETRY_COUNT, true );
+
+		if ( is_numeric( $retry_count ) ) {
+			return (int) $retry_count;
+		}
+
+		$legacy_count = self::get_external_job_retry_count( $attachment_id );
+		if ( $legacy_count > 0 ) {
+			update_post_meta( $attachment_id, self::META_KEY_RETRY_COUNT, $legacy_count );
+			return $legacy_count;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Increment unified retry count (keeps legacy key in sync during migration).
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return int New retry count after increment.
+	 */
+	public static function increment_retry_count( $attachment_id ) {
+		$new_count = self::get_retry_count( $attachment_id ) + 1;
+		update_post_meta( $attachment_id, self::META_KEY_RETRY_COUNT, $new_count );
+		update_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_RETRY_COUNT, $new_count );
+		return $new_count;
+	}
+
+	/**
+	 * Reset unified and legacy retry counters.
+	 *
+	 * @since 4.3.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return void
+	 */
+	public static function reset_retry_count( $attachment_id ) {
+		delete_post_meta( $attachment_id, self::META_KEY_RETRY_COUNT );
+		self::reset_external_job_retry_count( $attachment_id );
 	}
 
 	/**
@@ -526,14 +712,15 @@ class AttachmentMetaHandler {
 	}
 
 	/**
-	 * Generate file URL from file path.
+	 * Generate a file URL from a file path.
 	 *
-	 * Handles all file types:
-	 * - Images: Converts local file paths to WordPress upload URLs
+	 * Handles different conversion scenarios:
+	 * - Image formats (webp/avif/original): Converts file path to WordPress upload URL
 	 * - Videos: Handles special AV1 filename format (file-av1.mp4) and converts to URL
 	 * - CDN URLs: Returns as-is (already URLs)
 	 *
 	 * @since 3.0.0
+	 * @since 4.3.0 Use UploadPathGuard for uploads containment before URL generation.
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $file_path     File path or URL.
 	 * @param string $format        Format (webp, avif, av1, webm, original, etc.).
@@ -544,44 +731,36 @@ class AttachmentMetaHandler {
 		if ( self::is_file_url( $file_path ) ) {
 			return esc_url_raw( $file_path );
 		}
-		
+
+		$uploads_root = UploadPathGuard::get_uploads_basedir();
+		$base_url = UploadPathGuard::get_uploads_baseurl();
+		if ( false === $uploads_root || false === $base_url ) {
+			return null;
+		}
+
 		// For image formats (webp, avif, original), convert file path to WordPress upload URL.
 		if ( in_array( $format, [ 'webp', 'avif', 'original' ], true ) ) {
-			// Check if file exists before converting.
-			if ( file_exists( $file_path ) ) {
-				$upload_dir = wp_upload_dir();
-				$upload_path = wp_normalize_path( $upload_dir['basedir'] );
-				$file_path_normalized = wp_normalize_path( $file_path );
-				
-				if ( strpos( $file_path_normalized, $upload_path ) === 0 ) {
-					// File is in uploads directory, convert to URL.
-					$relative_path = str_replace( $upload_path, '', $file_path_normalized );
-					$relative_path = ltrim( $relative_path, '/' );
-					return $upload_dir['baseurl'] . '/' . $relative_path;
-				}
+			$relative_path = UploadPathGuard::get_relative_path_within( $file_path, $uploads_root );
+			if ( false === $relative_path || $relative_path === '' ) {
+				return null;
 			}
+
+			return $base_url . '/' . $relative_path;
 		}
-		
+
 		// For video formats (av1, webm), handle special AV1 filename and convert to URL.
 		if ( in_array( $format, [ 'av1', 'webm' ], true ) ) {
+			$relative_path = UploadPathGuard::get_relative_path_within( $file_path, $uploads_root );
+			if ( false !== $relative_path && $relative_path !== '' ) {
+				return $base_url . '/' . $relative_path;
+			}
+
+			// Fallback: use attachment URL if file exists but not in uploads directory.
 			if ( file_exists( $file_path ) ) {
-				$upload_dir = wp_upload_dir();
-				$upload_path = wp_normalize_path( $upload_dir['basedir'] );
-				$file_path_normalized = wp_normalize_path( $file_path );
-				
-				if ( strpos( $file_path_normalized, $upload_path ) === 0 ) {
-					// File is in uploads directory, convert to URL.
-					// Handle AV1 special case: file-av1.mp4 should map to correct URL.
-					$relative_path = str_replace( $upload_path, '', $file_path_normalized );
-					$relative_path = ltrim( $relative_path, '/' );
-					return $upload_dir['baseurl'] . '/' . $relative_path;
-				}
-				
-				// Fallback: use attachment URL if file exists but not in uploads directory.
 				return wp_get_attachment_url( $attachment_id );
 			}
 		}
-		
+
 		return null;
 	}
 
@@ -592,6 +771,7 @@ class AttachmentMetaHandler {
 	 * For file paths: uses file system check.
 	 *
 	 * @since 3.0.0
+	 * @since 4.3.0 Resolve local upload URLs through UploadPathGuard.
 	 * @param int    $attachment_id Attachment ID.
 	 * @param string $format        Format (webp, avif, av1, webm, original, etc.).
 	 * @param string $size          Size name (full, thumbnail, medium, etc.). Default 'full'.
@@ -599,20 +779,29 @@ class AttachmentMetaHandler {
 	 */
 	public static function file_exists( $attachment_id, $format, $size = 'full' ) {
 		$url = self::get_converted_file_url( $attachment_id, $format, $size );
-		
+
 		if ( empty( $url ) ) {
 			return false;
 		}
-		
+
 		// If it's a CDN URL (starts with http/https), assume it exists if it's in meta.
 		if ( self::is_file_url( $url ) ) {
+			$base_url = UploadPathGuard::get_uploads_baseurl();
+			$base_dir = UploadPathGuard::get_uploads_basedir();
+			if ( false !== $base_url && false !== $base_dir ) {
+				$local_path = UploadPathGuard::local_upload_url_to_path( $url, $base_url, $base_dir );
+				if ( false !== $local_path ) {
+					return file_exists( $local_path );
+				}
+			}
+
 			return true;
 		}
-		
+
 		// For local URLs, check if file_path exists in meta, then check file system.
 		$converted_files_by_size = self::get_converted_files_grouped_by_size( $attachment_id );
 		$data = null;
-		
+
 		if ( ! empty( $converted_files_by_size ) ) {
 			if ( isset( $converted_files_by_size[ $size ][ $format ] ) ) {
 				$data = $converted_files_by_size[ $size ][ $format ];
@@ -620,23 +809,29 @@ class AttachmentMetaHandler {
 				$data = $converted_files_by_size['full'][ $format ];
 			}
 		}
-		
+
 		// If file_path is stored in meta, check that file.
 		if ( is_array( $data ) && isset( $data['file_path'] ) && ! empty( $data['file_path'] ) ) {
-			return file_exists( $data['file_path'] );
+			$uploads_root = UploadPathGuard::get_uploads_basedir();
+			if ( false === $uploads_root ) {
+				return false;
+			}
+
+			return UploadPathGuard::is_existing_path_within( $data['file_path'], $uploads_root );
 		}
-		
+
 		// Fallback: try to get file path from URL for local files.
-		$upload_dir = wp_upload_dir();
-		$base_url = $upload_dir['baseurl'];
-		
-		if ( strpos( $url, $base_url ) === 0 ) {
-			$relative_path = str_replace( $base_url, '', $url );
-			$relative_path = ltrim( $relative_path, '/' );
-			$file_path = $upload_dir['basedir'] . '/' . $relative_path;
-			return file_exists( $file_path );
+		$base_url = UploadPathGuard::get_uploads_baseurl();
+		$base_dir = UploadPathGuard::get_uploads_basedir();
+		if ( false === $base_url || false === $base_dir ) {
+			return ! empty( $url );
 		}
-		
+
+		$local_path = UploadPathGuard::local_upload_url_to_path( $url, $base_url, $base_dir );
+		if ( false !== $local_path ) {
+			return true;
+		}
+
 		// If we have a URL in meta, assume it exists.
 		return true;
 	}
@@ -788,7 +983,7 @@ class AttachmentMetaHandler {
 			}
 		} elseif ( $state === 'completed' ) {
 			self::delete_external_job_started_at( $attachment_id );
-			self::reset_external_job_retry_count( $attachment_id );
+			self::reset_retry_count( $attachment_id );
 		}
 
 		return update_post_meta( $attachment_id, self::META_KEY_EXTERNAL_JOB_STATE, $state );
@@ -880,7 +1075,7 @@ class AttachmentMetaHandler {
 	public static function delete_external_job_lifecycle_meta( $attachment_id ) {
 		self::delete_external_job_state( $attachment_id );
 		self::delete_external_job_started_at( $attachment_id );
-		self::reset_external_job_retry_count( $attachment_id );
+		self::reset_retry_count( $attachment_id );
 	}
 
 	/**

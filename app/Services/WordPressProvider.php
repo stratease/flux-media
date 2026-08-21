@@ -14,10 +14,12 @@ use FluxMedia\App\Services\VideoConverter;
 use FluxMedia\App\Services\ConversionTracker;
 use FluxMedia\App\Services\WordPressImageRenderer;
 use FluxMedia\App\Services\WordPressVideoRenderer;
+use FluxMedia\App\Services\AttachmentDetailsMountRenderer;
 use FluxMedia\App\Services\Settings;
 use FluxMedia\App\Services\Converter;
 use FluxMedia\App\Services\AttachmentMetaHandler;
-use FluxMedia\App\Services\GifAnimationDetector;
+use FluxMedia\App\Services\ProcessorDetector;
+use FluxMedia\App\Services\SourceFormatRegistry;
 use FluxMedia\App\Services\MediaProcessingServiceLocator;
 use FluxMedia\App\Services\ActionSchedulerService;
 
@@ -77,6 +79,14 @@ class WordPressProvider {
     private $video_renderer;
 
     /**
+     * Attachment details mount renderer.
+     *
+     * @since 4.3.0
+     * @var AttachmentDetailsMountRenderer
+     */
+    private $attachment_details_mount_renderer;
+
+    /**
      * Media processing service locator instance.
      *
      * @since 3.0.0
@@ -91,6 +101,22 @@ class WordPressProvider {
      * @var ActionSchedulerService
      */
     private $action_scheduler_service;
+
+    /**
+     * Unified conversion retry service.
+     *
+     * @since 4.3.0
+     * @var ConversionRetryService|null
+     */
+    private $conversion_retry_service;
+
+    /**
+     * Shared conversion orchestrator.
+     *
+     * @since 4.3.0
+     * @var ConversionOrchestrator|null
+     */
+    private $conversion_orchestrator;
 
     /**
      * Track attachments pending processing after metadata stabilizes.
@@ -113,6 +139,7 @@ class WordPressProvider {
         $this->video_converter = $video_converter;
         $this->image_renderer = new WordPressImageRenderer( $video_converter );
         $this->video_renderer = new WordPressVideoRenderer();
+        $this->attachment_details_mount_renderer = new AttachmentDetailsMountRenderer();
         $this->conversion_tracker = new ConversionTracker( $this->logger );
     }
 
@@ -146,6 +173,28 @@ class WordPressProvider {
      */
     public function set_action_scheduler_service( ActionSchedulerService $action_scheduler_service ) {
         $this->action_scheduler_service = $action_scheduler_service;
+    }
+
+    /**
+     * Set unified conversion retry service.
+     *
+     * @since 4.3.0
+     * @param ConversionRetryService $conversion_retry_service Retry service.
+     * @return void
+     */
+    public function set_conversion_retry_service( ConversionRetryService $conversion_retry_service ) {
+        $this->conversion_retry_service = $conversion_retry_service;
+    }
+
+    /**
+     * Set the shared conversion orchestrator.
+     *
+     * @since 4.3.0
+     * @param ConversionOrchestrator $conversion_orchestrator Orchestrator.
+     * @return void
+     */
+    public function set_conversion_orchestrator( ConversionOrchestrator $conversion_orchestrator ) {
+        $this->conversion_orchestrator = $conversion_orchestrator;
     }
 
     /**
@@ -237,6 +286,10 @@ class WordPressProvider {
         // Always add attachment fields for admin display
         add_filter( 'attachment_fields_to_edit', [ $this, 'handle_attachment_fields_filter' ], 10, 2 );
 
+        // Allow HEIC/HEIF uploads when local Imagick libheif decode is available.
+        add_filter( 'upload_mimes', [ $this, 'add_heic_upload_mimes' ] );
+        add_filter( 'wp_check_filetype_and_ext', [ $this, 'fix_heic_filetype' ], 10, 5 );
+
         // ===== CLEANUP =====
         // Cleanup hooks
         add_action( 'delete_attachment', [ $this, 'handle_attachment_deletion' ] );
@@ -269,17 +322,20 @@ class WordPressProvider {
 
         // Check external job state - prevent processing if job is 'queued' or 'processing'
         $job_state = AttachmentMetaHandler::get_external_job_state( $attachment_id );
-        if ( in_array( $job_state, [ 'queued', 'processing' ], true ) ) {
+        if ( AttachmentMetaHandler::is_in_flight_job_state( $job_state ) ) {
             return true;
         }
 
         // Check auto-convert settings based on file type (only for upload hooks, not manual actions)
         if ( ! $skip_auto_convert_check ) {
-            $file_path = get_attached_file( $attachment_id );
+            $file_path = $this->image_converter->get_optimization_source_path( $attachment_id );
+            if ( ! $file_path ) {
+                $file_path = get_attached_file( $attachment_id );
+            }
 
             // Determine file type and check auto-convert settings.
-            $is_supported_image = $this->image_converter->is_supported_image( $file_path );
-            $is_supported_video = $this->video_converter->is_supported_video( $file_path );
+            $is_supported_image = $file_path ? $this->image_converter->is_supported_image( $file_path ) : false;
+            $is_supported_video = $file_path ? $this->video_converter->is_supported_video( $file_path ) : false;
 
             if ( $file_path && $is_supported_image && ! Settings::is_image_auto_convert_enabled() ) {
                 return true;
@@ -385,27 +441,6 @@ class WordPressProvider {
         AttachmentMetaHandler::delete_all( $attachment_id );
 
         $this->logger->info( "Deleted {$deleted_count}/{$total_count} converted files for attachment {$attachment_id}" );
-    }
-
-    /**
-     * Get converted file path for a specific format.
-     *
-     * @since 0.1.0
-     * @param int    $attachment_id WordPress attachment ID.
-     * @param string $format Target format (webp, avif, av1, webm).
-     * @return string|null File path or null if not found.
-     */
-    public function get_converted_file_path( $attachment_id, $format ) {
-        $converted_files_by_size = AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id );
-        $converted_files = ! empty( $converted_files_by_size ) && isset( $converted_files_by_size['full'] )
-            ? $converted_files_by_size['full']
-            : [];
-        
-        // Extract URL from unified structure.
-        if ( isset( $converted_files[ $format ] ) && is_array( $converted_files[ $format ] ) && isset( $converted_files[ $format ]['url'] ) ) {
-            return $converted_files[ $format ]['url'];
-        }
-        return null;
     }
 
     /**
@@ -1114,7 +1149,7 @@ class WordPressProvider {
      * @return array Modified form fields.
      */
     public function handle_attachment_fields_filter( $form_fields, $post ) {
-        return $this->image_renderer->modify_attachment_fields( $form_fields, $post );
+        return $this->attachment_details_mount_renderer->modify_attachment_fields( $form_fields, $post );
     }
 
     /**
@@ -1162,6 +1197,7 @@ class WordPressProvider {
      * Handle AJAX request to convert attachment.
      *
      * @since 0.1.0
+     * @since 4.3.0 Uses edit_post attachment meta capability.
      * @return void
      */
     public function handle_ajax_convert_attachment() {
@@ -1171,18 +1207,18 @@ class WordPressProvider {
             wp_die( esc_html__( 'Security check failed', 'flux-media-optimizer' ) );
         }
 
-        // Check permissions
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
-        }
-
         $attachment_id = (int) sanitize_text_field( wp_unslash( $_POST['attachment_id'] ?? 0 ) );
-        if ( ! $attachment_id ) {
-            wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
+        if ( ! $attachment_id || ! current_user_can( 'edit_post', $attachment_id ) ) {
+            wp_send_json_error( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
         }
 
-        // Clear external job lifecycle meta to allow forced re-conversion.
-        AttachmentMetaHandler::delete_external_job_lifecycle_meta( $attachment_id );
+        // Reset retry cycle and lifecycle meta so Re-convert starts a fresh 3-attempt window.
+        if ( $this->conversion_retry_service ) {
+            $this->conversion_retry_service->reset_cycle( $attachment_id );
+        } else {
+            AttachmentMetaHandler::delete_external_job_lifecycle_meta( $attachment_id );
+            AttachmentMetaHandler::clear_conversion_failure( $attachment_id );
+        }
 
         $result = $this->convert_attachment( $attachment_id );
         
@@ -1198,7 +1234,7 @@ class WordPressProvider {
      * Handle AJAX request to disable conversion for attachment.
      *
      * @since 0.1.0
-     * 
+     * @since 4.3.0 Uses edit_post attachment meta capability.
      * @return void
      */
     public function handle_ajax_disable_conversion() {
@@ -1208,14 +1244,9 @@ class WordPressProvider {
             wp_die( esc_html__( 'Security check failed', 'flux-media-optimizer' ) );
         }
 
-        // Check permissions
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
-        }
-
         $attachment_id = (int) sanitize_text_field( wp_unslash( $_POST['attachment_id'] ?? 0 ) );
-        if ( ! $attachment_id ) {
-            wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
+        if ( ! $attachment_id || ! current_user_can( 'edit_post', $attachment_id ) ) {
+            wp_send_json_error( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
         }
 
         if ( ! $this->service_locator ) {
@@ -1241,6 +1272,7 @@ class WordPressProvider {
      * Handle AJAX request to enable conversion for attachment.
      *
      * @since 0.1.0
+     * @since 4.3.0 Uses edit_post attachment meta capability.
      * @return void
      */
     public function handle_ajax_enable_conversion() {
@@ -1250,14 +1282,9 @@ class WordPressProvider {
             wp_die( esc_html__( 'Security check failed', 'flux-media-optimizer' ) );
         }
 
-        // Check permissions
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
-        }
-
         $attachment_id = (int) sanitize_text_field( wp_unslash( $_POST['attachment_id'] ?? 0 ) );
-        if ( ! $attachment_id ) {
-            wp_send_json_error( esc_html__( 'Invalid attachment ID', 'flux-media-optimizer' ) );
+        if ( ! $attachment_id || ! current_user_can( 'edit_post', $attachment_id ) ) {
+            wp_send_json_error( esc_html__( 'Insufficient permissions', 'flux-media-optimizer' ) );
         }
 
         // Remove conversion disabled flag
@@ -1441,7 +1468,7 @@ class WordPressProvider {
             return;
         }
 
-        if ( ! $this->service_locator ) {
+        if ( ! $this->service_locator && ! $this->conversion_orchestrator ) {
             return;
         }
 
@@ -1449,17 +1476,16 @@ class WordPressProvider {
         $pending = self::$pending_attachments;
         self::$pending_attachments = [];
 
-        // Process each pending attachment via service
-        $processor = $this->service_locator->get_processor();
         foreach ( $pending as $attachment_id ) {
-            $file_path = get_attached_file( $attachment_id );
-            if ( ! $file_path || ! file_exists( $file_path ) ) {
+            if ( $this->conversion_orchestrator ) {
+                $this->conversion_orchestrator->dispatch(
+                    new ConversionRequest( (int) $attachment_id, ConversionRequest::TRIGGER_UPLOAD )
+                );
                 continue;
             }
 
-            // Route all processing through the service
-            // The service handles images, videos, and other file types appropriately
-            $processor->process( $attachment_id, $file_path );
+            $processor = $this->service_locator->get_processor();
+            $processor->process( $attachment_id );
         }
     }
 
@@ -1600,6 +1626,69 @@ class WordPressProvider {
 
         return $response;
     }
-}
 
+    /**
+     * Add HEIC/HEIF MIME types when local decode support is available.
+     *
+     * @since 4.3.0
+     * @param array $mimes Existing upload MIME map.
+     * @return array
+     */
+    public function add_heic_upload_mimes( $mimes ) {
+        $processor_detector = new ProcessorDetector();
+        $registry = new SourceFormatRegistry();
+        $heic_mimes = $registry->get_heic_upload_mimes( $processor_detector->imagick_supports_heic() );
+
+        return array_merge( $mimes, $heic_mimes );
+    }
+
+    /**
+     * Ensure WordPress recognizes HEIC/HEIF extensions during upload validation.
+     *
+     * Requires a matching HEIC/HEIF extension, an allowed real MIME when provided,
+     * and a decodable temporary file. Renamed or spoofed files stay rejected.
+     *
+     * @since 4.3.0
+     * @param array       $data      File data array.
+     * @param string      $file      Full temporary file path.
+     * @param string      $filename  File name.
+     * @param array       $mimes     Allowed MIME types.
+     * @param string|null $real_mime Detected MIME type.
+     * @return array
+     */
+    public function fix_heic_filetype( $data, $file, $filename, $mimes, $real_mime ) {
+        $processor_detector = new ProcessorDetector();
+        if ( ! $processor_detector->imagick_supports_heic() ) {
+            return $data;
+        }
+
+        $extension = strtolower( pathinfo( (string) $filename, PATHINFO_EXTENSION ) );
+        $registry  = new SourceFormatRegistry();
+        $mime      = $registry->get_mime_for_extension( $extension );
+
+        if ( ! $mime ) {
+            return $data;
+        }
+
+        $allowed_mimes = array_values( $registry->get_heic_upload_mimes( true ) );
+        if ( is_string( $real_mime ) && '' !== $real_mime && ! in_array( $real_mime, $allowed_mimes, true ) ) {
+            return $data;
+        }
+
+        if ( ! is_string( $file ) || '' === $file || ! file_exists( $file ) ) {
+            return $data;
+        }
+
+        $probe = new HeifCapabilityProbe();
+        if ( ! $probe->can_decode_file( $file ) ) {
+            return $data;
+        }
+
+        $data['ext']             = $extension;
+        $data['type']            = $mime;
+        $data['proper_filename'] = $data['proper_filename'] ?? false;
+
+        return $data;
+    }
+}
 

@@ -9,7 +9,6 @@
 namespace FluxMedia\Tests\Unit;
 
 use FluxMedia\App\Services\AttachmentMetaHandler;
-use FluxMedia\App\Services\CleanupService;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -20,87 +19,6 @@ use PHPUnit\Framework\TestCase;
 class AttachmentMetaHandlerJobLifecycleTest extends TestCase {
 
 	/**
-	 * In-memory post meta storage for stubs.
-	 *
-	 * @since 4.2.0
-	 * @var array<int, array<string, mixed>>
-	 */
-	public static $post_meta = [];
-
-	/**
-	 * Bootstrap WordPress function stubs once.
-	 *
-	 * @since 4.2.0
-	 * @return void
-	 */
-	public static function setUpBeforeClass(): void {
-		parent::setUpBeforeClass();
-
-		if ( ! function_exists( 'get_post_meta' ) ) {
-			/**
-			 * Stub get_post_meta.
-			 *
-			 * @param int    $post_id Post ID.
-			 * @param string $key Meta key.
-			 * @param bool   $single Return single value.
-			 * @return mixed
-			 */
-			function get_post_meta( $post_id, $key, $single = false ) {
-				$post_id = (int) $post_id;
-				if ( ! isset( AttachmentMetaHandlerJobLifecycleTest::$post_meta[ $post_id ][ $key ] ) ) {
-					return $single ? '' : [];
-				}
-
-				$value = AttachmentMetaHandlerJobLifecycleTest::$post_meta[ $post_id ][ $key ];
-				return $single ? $value : [ $value ];
-			}
-		}
-
-		if ( ! function_exists( 'update_post_meta' ) ) {
-			/**
-			 * Stub update_post_meta.
-			 *
-			 * @param int    $post_id Post ID.
-			 * @param string $key Meta key.
-			 * @param mixed  $value Meta value.
-			 * @return bool
-			 */
-			function update_post_meta( $post_id, $key, $value ) {
-				$post_id = (int) $post_id;
-				AttachmentMetaHandlerJobLifecycleTest::$post_meta[ $post_id ][ $key ] = $value;
-				return true;
-			}
-		}
-
-		if ( ! function_exists( 'delete_post_meta' ) ) {
-			/**
-			 * Stub delete_post_meta.
-			 *
-			 * @param int    $post_id Post ID.
-			 * @param string $key Meta key.
-			 * @return bool
-			 */
-			function delete_post_meta( $post_id, $key ) {
-				$post_id = (int) $post_id;
-				unset( AttachmentMetaHandlerJobLifecycleTest::$post_meta[ $post_id ][ $key ] );
-				return true;
-			}
-		}
-
-		if ( ! function_exists( 'absint' ) ) {
-			/**
-			 * Stub absint.
-			 *
-			 * @param mixed $value Value.
-			 * @return int
-			 */
-			function absint( $value ) {
-				return abs( (int) $value );
-			}
-		}
-	}
-
-	/**
 	 * Reset in-memory meta before each test.
 	 *
 	 * @since 4.2.0
@@ -108,7 +26,7 @@ class AttachmentMetaHandlerJobLifecycleTest extends TestCase {
 	 */
 	protected function setUp(): void {
 		parent::setUp();
-		self::$post_meta = [];
+		$GLOBALS['fmo_test_post_meta'] = [];
 	}
 
 	/**
@@ -142,20 +60,67 @@ class AttachmentMetaHandlerJobLifecycleTest extends TestCase {
 	}
 
 	/**
-	 * Test retry count increment and cleanup helper thresholds.
+	 * Unified retry counter increments and resets for the 4.3.0 retry budget.
+	 *
+	 * Legacy external counter migration is covered in ConversionRetryServiceTest.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Uses unified retry counter API.
 	 * @return void
 	 */
-	public function testRetryCountIncrementAndEligibility() {
-		$this->assertSame( 1, AttachmentMetaHandler::increment_external_job_retry_count( 103 ) );
-		$this->assertSame( 2, AttachmentMetaHandler::increment_external_job_retry_count( 103 ) );
-		$this->assertTrue( CleanupService::is_retry_eligible( AttachmentMetaHandler::get_external_job_retry_count( 103 ), 3 ) );
+	public function testRetryCountIncrementAndReset() {
+		$this->assertSame( 1, AttachmentMetaHandler::increment_retry_count( 103 ) );
+		$this->assertSame( 2, AttachmentMetaHandler::increment_retry_count( 103 ) );
+		$this->assertSame( 2, AttachmentMetaHandler::get_retry_count( 103 ) );
 
-		AttachmentMetaHandler::increment_external_job_retry_count( 103 );
-		$this->assertFalse( CleanupService::is_retry_eligible( AttachmentMetaHandler::get_external_job_retry_count( 103 ), 3 ) );
+		AttachmentMetaHandler::reset_retry_count( 103 );
+		$this->assertSame( 0, AttachmentMetaHandler::get_retry_count( 103 ) );
+	}
 
-		AttachmentMetaHandler::reset_external_job_retry_count( 103 );
-		$this->assertSame( 0, AttachmentMetaHandler::get_external_job_retry_count( 103 ) );
+	/**
+	 * Test in-flight job state helpers.
+	 *
+	 * @since 4.2.1
+	 * @return void
+	 */
+	public function testInFlightJobStateHelpers() {
+		$this->assertSame(
+			[ 'queued', 'processing' ],
+			AttachmentMetaHandler::get_in_flight_job_states()
+		);
+		$this->assertTrue( AttachmentMetaHandler::is_in_flight_job_state( 'queued' ) );
+		$this->assertTrue( AttachmentMetaHandler::is_in_flight_job_state( 'processing' ) );
+		$this->assertFalse( AttachmentMetaHandler::is_in_flight_job_state( 'completed' ) );
+		$this->assertFalse( AttachmentMetaHandler::is_in_flight_job_state( null ) );
+	}
+
+	/**
+	 * HEIC decode failures persist error meta and failed job state for Media Library.
+	 *
+	 * @since 4.3.0
+	 * @return void
+	 */
+	public function testMarkConversionFailedStoresErrorAndFailedState() {
+		AttachmentMetaHandler::mark_conversion_failed( 416, 'Unable to decode HEIC source' );
+
+		$this->assertSame( 'failed', AttachmentMetaHandler::get_external_job_state( 416 ) );
+		$this->assertSame(
+			'Unable to decode HEIC source',
+			AttachmentMetaHandler::get_conversion_error( 416 )
+		);
+	}
+
+	/**
+	 * Clearing failure removes error meta and failed state.
+	 *
+	 * @since 4.3.0
+	 * @return void
+	 */
+	public function testClearConversionFailureRemovesErrorMarkers() {
+		AttachmentMetaHandler::mark_conversion_failed( 417, 'Decode failed' );
+		AttachmentMetaHandler::clear_conversion_failure( 417 );
+
+		$this->assertSame( '', AttachmentMetaHandler::get_conversion_error( 417 ) );
+		$this->assertNull( AttachmentMetaHandler::get_external_job_state( 417 ) );
 	}
 }

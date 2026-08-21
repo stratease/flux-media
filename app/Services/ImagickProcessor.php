@@ -37,6 +37,22 @@ class ImagickProcessor implements ImageProcessorInterface {
 	private $imagick;
 
 	/**
+	 * Multi-frame detector instance.
+	 *
+	 * @since 4.3.0
+	 * @var MultiFrameDetector
+	 */
+	private $multi_frame_detector;
+
+	/**
+	 * HEIF capability probe.
+	 *
+	 * @since 4.3.0
+	 * @var HeifCapabilityProbe
+	 */
+	private $heif_probe;
+
+	/**
 	 * Constructor.
 	 *
 	 * @since 0.1.0
@@ -45,6 +61,8 @@ class ImagickProcessor implements ImageProcessorInterface {
 	public function __construct( Logger $logger ) {
 		$this->logger = $logger;
 		$this->imagick = new Imagick();
+		$this->multi_frame_detector = new MultiFrameDetector( $logger );
+		$this->heif_probe = new HeifCapabilityProbe();
 	}
 
 	/**
@@ -67,6 +85,9 @@ class ImagickProcessor implements ImageProcessorInterface {
 			'avif_capabilities' => $version_info['avif_capabilities'],
 			'supported_formats' => $formats,
 			'animated_gif_support' => $this->supports_animated_gif(),
+			'multi_frame_support' => $this->supports_multi_frame(),
+			'heic_support' => $this->heif_probe->supports_static_heic(),
+			'animated_heic_support' => $this->heif_probe->supports_animated_heic( in_array( 'WEBP', $formats, true ) ),
 		];
 	}
 
@@ -87,95 +108,35 @@ class ImagickProcessor implements ImageProcessorInterface {
 
 		try {
 			$image = new Imagick( $source_path );
-			
-			// Check if this is an animated GIF.
-			$is_animated = $this->is_animated_gif( $source_path );
-			
-			if ( $is_animated ) {
-				// Coalesce images to ensure all frames are properly loaded.
-				$image = $image->coalesceImages();
-				
-				// Preserve loop count from original image.
-				$original_image = new Imagick( $source_path );
-				$loop_count = $original_image->getImageIterations();
-				$original_image->clear();
-				$original_image->destroy();
-				
-				// Get resize dimensions if provided.
-				$resize_width = $options['resize_width'] ?? null;
-				$resize_height = $options['resize_height'] ?? null;
-				
-				// Iterate through each frame and apply settings.
-				do {
-					// Resize frame if dimensions are provided.
-					if ( $resize_width && $resize_height ) {
-						$image->resizeImage( $resize_width, $resize_height, Imagick::FILTER_LANCZOS, 1, true );
-					}
-					
-					// Set optimized WebP options for better compression.
-					$image->setImageFormat( 'WEBP' );
-					$image->setImageCompressionQuality( $options['webp_quality'] );
-					
-					// Enable lossless compression if requested.
-					if ( $options['lossless'] ?? false ) {
-						$image->setOption( 'webp:lossless', 'true' );
-					} else {
-						// Use optimized WebP options for better compression and smaller file sizes.
-						$image->setOption( 'webp:method', '4' ); // Balanced compression method (was 6).
-						$image->setOption( 'webp:pass', '6' ); // Fewer passes for faster/smaller files (was 10).
-						$image->setOption( 'webp:preprocessing', '1' ); // Less aggressive preprocessing (was 2).
-					}
+			// HEIF sequences preserve animation only via FFmpeg (HeifAnimationPolicy);
+			// Imagick always writes a static first frame for those sources.
+			$is_multi_frame = $this->is_multi_frame( $source_path )
+				&& ! $this->multi_frame_detector->is_heif_sequence( $source_path );
 
-					// Strip metadata for smaller file size.
-					$image->stripImage();
-				} while ( $image->nextImage() );
-				
-				// Reset iterator to first frame.
-				$image->setFirstIterator();
-				
-				// Set loop count for the entire animation.
-				$image->setImageIterations( $loop_count );
-				
-				// Write all frames as animated WebP.
-				$result = $image->writeImages( $destination_path, true );
-			} else {
-				// Set optimized WebP options for better compression.
-				$image->setImageFormat( 'WEBP' );
-				$image->setImageCompressionQuality( $options['webp_quality'] );
-				
-				// Enable lossless compression if requested.
-				if ( $options['lossless'] ?? false ) {
-					$image->setOption( 'webp:lossless', 'true' );
-				} else {
-					// Use optimized WebP options for better compression and smaller file sizes.
-					$image->setOption( 'webp:method', '4' ); // Balanced compression method (was 6).
-					$image->setOption( 'webp:pass', '6' ); // Fewer passes for faster/smaller files (was 10).
-					$image->setOption( 'webp:preprocessing', '1' ); // Less aggressive preprocessing (was 2).
-				}
-
-				// Strip metadata for smaller file size.
-				$image->stripImage();
-
-				// Write the converted image.
-				$result = $image->writeImage( $destination_path );
+			if ( $this->multi_frame_detector->is_heif_sequence( $source_path ) ) {
+				$image->setIteratorIndex( 0 );
 			}
-			
+
+			if ( $is_multi_frame ) {
+				$result = $this->convert_multi_frame_to_webp( $image, $source_path, $destination_path, $options );
+			} else {
+				$result = $this->convert_static_to_webp( $image, $destination_path, $options );
+			}
+
 			$image->clear();
 			$image->destroy();
 
-			// Check if writeImage/writeImages actually succeeded
 			if ( $result === false ) {
 				$this->logger->error( "Imagick writeImage() failed for WebP conversion to: {$destination_path}" );
 				return false;
 			}
 
-			// Verify the file was actually created
 			if ( ! file_exists( $destination_path ) ) {
 				$this->logger->error( "WebP file was not created at: {$destination_path}" );
 				return false;
 			}
 
-			if ( $is_animated ) {
+			if ( $is_multi_frame ) {
 				$this->logger->debug( "Animated WebP conversion successful: {$destination_path}" );
 			}
 
@@ -184,6 +145,78 @@ class ImagickProcessor implements ImageProcessorInterface {
 			$this->logger->error( "Imagick WebP conversion failed: {$e->getMessage()}" );
 			return false;
 		}
+	}
+
+	/**
+	 * Convert a static image to WebP.
+	 *
+	 * @since 4.3.0
+	 * @param Imagick $image            Loaded Imagick instance.
+	 * @param string  $destination_path Destination path.
+	 * @param array   $options          Conversion options.
+	 * @return bool
+	 */
+	private function convert_static_to_webp( Imagick $image, $destination_path, $options ) {
+		$image->setImageFormat( 'WEBP' );
+		$image->setImageCompressionQuality( $options['webp_quality'] );
+
+		if ( $options['lossless'] ?? false ) {
+			$image->setOption( 'webp:lossless', 'true' );
+		} else {
+			$image->setOption( 'webp:method', '4' );
+			$image->setOption( 'webp:pass', '6' );
+			$image->setOption( 'webp:preprocessing', '1' );
+		}
+
+		$image->stripImage();
+
+		return $image->writeImage( $destination_path );
+	}
+
+	/**
+	 * Convert a multi-frame source to animated WebP.
+	 *
+	 * @since 4.3.0
+	 * @param Imagick $image            Loaded Imagick instance.
+	 * @param string  $source_path      Original source path for loop metadata.
+	 * @param string  $destination_path Destination path.
+	 * @param array   $options          Conversion options.
+	 * @return bool
+	 */
+	private function convert_multi_frame_to_webp( Imagick $image, $source_path, $destination_path, $options ) {
+		$image = $image->coalesceImages();
+
+		$original_image = new Imagick( $source_path );
+		$loop_count = $original_image->getImageIterations();
+		$original_image->clear();
+		$original_image->destroy();
+
+		$resize_width = $options['resize_width'] ?? null;
+		$resize_height = $options['resize_height'] ?? null;
+
+		do {
+			if ( $resize_width && $resize_height ) {
+				$image->resizeImage( $resize_width, $resize_height, Imagick::FILTER_LANCZOS, 1, true );
+			}
+
+			$image->setImageFormat( 'WEBP' );
+			$image->setImageCompressionQuality( $options['webp_quality'] );
+
+			if ( $options['lossless'] ?? false ) {
+				$image->setOption( 'webp:lossless', 'true' );
+			} else {
+				$image->setOption( 'webp:method', '4' );
+				$image->setOption( 'webp:pass', '6' );
+				$image->setOption( 'webp:preprocessing', '1' );
+			}
+
+			$image->stripImage();
+		} while ( $image->nextImage() );
+
+		$image->setFirstIterator();
+		$image->setImageIterations( $loop_count );
+
+		return $image->writeImages( $destination_path, true );
 	}
 
 	/**
@@ -203,110 +236,116 @@ class ImagickProcessor implements ImageProcessorInterface {
 
 		try {
 			$image = new Imagick( $source_path );
-			
-			// Check if this is an animated GIF.
-			$is_animated = $this->is_animated_gif( $source_path );
-			
-			// Get ImageMagick version and capabilities
+			// HEIF sequences never use Imagick animated AVIF; always static first frame.
+			$is_multi_frame = $this->is_multi_frame( $source_path )
+				&& ! $this->multi_frame_detector->is_heif_sequence( $source_path );
 			$version_info = $this->get_imagick_version_info();
 			$supports_animated_avif = version_compare( $version_info['version'], '7.1.0', '>=' );
-			
-			if ( $is_animated && ! $supports_animated_avif ) {
-				$this->logger->warning( "Animated GIF detected but ImageMagick version {$version_info['version']} does not support animated AVIF. Converting to static AVIF." );
-				$is_animated = false;
-			}
-			
-			if ( $is_animated ) {
-				// Coalesce images to ensure all frames are properly loaded.
-				$image = $image->coalesceImages();
-				
-				// Preserve loop count from original image.
-				$original_image = new Imagick( $source_path );
-				$loop_count = $original_image->getImageIterations();
-				$original_image->clear();
-				$original_image->destroy();
-				
-				// Get quality and speed settings.
-				$quality = $options['avif_quality'] ?? 70;
-				$speed = $options['avif_speed'] ?? 6;
-				
-				// Get resize dimensions if provided.
-				$resize_width = $options['resize_width'] ?? null;
-				$resize_height = $options['resize_height'] ?? null;
-				
-				$this->logger->debug( "ImageMagick version: {$version_info['version']}, AVIF capabilities: " . json_encode( $version_info['avif_capabilities'] ) );
-				
-				// Iterate through each frame and apply settings.
-				do {
-					// Resize frame if dimensions are provided.
-					if ( $resize_width && $resize_height ) {
-						$image->resizeImage( $resize_width, $resize_height, Imagick::FILTER_LANCZOS, 1, true );
-					}
-					
-					// Set AVIF format.
-					$image->setImageFormat( 'AVIF' );
-					
-					// Apply version-specific AVIF settings to this frame.
-					$this->apply_avif_settings( $image, $version_info, $quality, $speed );
-					
-					// Strip metadata for smaller file size.
-					$image->stripImage();
-				} while ( $image->nextImage() );
-				
-				// Reset iterator to first frame.
-				$image->setFirstIterator();
-				
-				// Set loop count for the entire animation.
-				$image->setImageIterations( $loop_count );
-				
-				// Write all frames as animated AVIF.
-				$result = $image->writeImages( $destination_path, true );
-			} else {
-				// Set AVIF format.
-				$image->setImageFormat( 'AVIF' );
-				
-				// Get ImageMagick version and capabilities.
-				$quality = $options['avif_quality'] ?? 70;
-				$speed = $options['avif_speed'] ?? 6;
-				
-				$this->logger->debug( "ImageMagick version: {$version_info['version']}, AVIF capabilities: " . json_encode( $version_info['avif_capabilities'] ) );
-				
-				// Apply version-specific AVIF settings.
-				$this->apply_avif_settings( $image, $version_info, $quality, $speed );
-				
-				// Strip metadata for smaller file size.
-				$image->stripImage();
 
-				// Write the converted image.
-				$result = $image->writeImage( $destination_path );
+			if ( $this->multi_frame_detector->is_heif_sequence( $source_path ) ) {
+				$image->setIteratorIndex( 0 );
+				$this->logger->warning( "HEIF sequence detected; writing static AVIF (first frame) for: {$source_path}" );
 			}
-			
+
+			if ( $is_multi_frame && ! $supports_animated_avif ) {
+				$this->logger->warning( "Multi-frame source detected but ImageMagick version {$version_info['version']} does not support animated AVIF. Converting to static AVIF." );
+				$is_multi_frame = false;
+			}
+
+			if ( $is_multi_frame ) {
+				$result = $this->convert_multi_frame_to_avif( $image, $source_path, $destination_path, $options, $version_info );
+			} else {
+				$result = $this->convert_static_to_avif( $image, $destination_path, $options, $version_info );
+			}
+
 			$image->clear();
 			$image->destroy();
 
-			// Check if writeImage/writeImages actually succeeded
 			if ( $result === false ) {
 				$this->logger->error( "Imagick writeImage() failed for AVIF conversion to: {$destination_path}" );
 				return false;
 			}
 
-			// Verify the file was actually created
 			if ( ! file_exists( $destination_path ) ) {
 				$this->logger->error( "AVIF file was not created at: {$destination_path}" );
 				return false;
 			}
 
-			if ( $is_animated ) {
+			if ( $is_multi_frame ) {
 				$this->logger->debug( "Animated AVIF conversion successful: {$destination_path}" );
 			} else {
 				$this->logger->debug( "AVIF conversion successful: {$destination_path}" );
 			}
-			
+
 			return $result;
 		} catch ( ImagickException $e ) {
 			$this->logger->error( "Imagick AVIF conversion failed: {$e->getMessage()}" );
 			return false;
 		}
+	}
+
+	/**
+	 * Convert a static image to AVIF.
+	 *
+	 * @since 4.3.0
+	 * @param Imagick $image            Loaded Imagick instance.
+	 * @param string  $destination_path Destination path.
+	 * @param array   $options          Conversion options.
+	 * @param array   $version_info     ImageMagick version info.
+	 * @return bool
+	 */
+	private function convert_static_to_avif( Imagick $image, $destination_path, $options, $version_info ) {
+		$quality = $options['avif_quality'] ?? 70;
+		$speed = $options['avif_speed'] ?? 6;
+
+		$image->setImageFormat( 'AVIF' );
+		$this->logger->debug( "ImageMagick version: {$version_info['version']}, AVIF capabilities: " . json_encode( $version_info['avif_capabilities'] ) );
+		$this->apply_avif_settings( $image, $version_info, $quality, $speed );
+		$image->stripImage();
+
+		return $image->writeImage( $destination_path );
+	}
+
+	/**
+	 * Convert a multi-frame source to animated AVIF.
+	 *
+	 * @since 4.3.0
+	 * @param Imagick $image            Loaded Imagick instance.
+	 * @param string  $source_path      Original source path for loop metadata.
+	 * @param string  $destination_path Destination path.
+	 * @param array   $options          Conversion options.
+	 * @param array   $version_info     ImageMagick version info.
+	 * @return bool
+	 */
+	private function convert_multi_frame_to_avif( Imagick $image, $source_path, $destination_path, $options, $version_info ) {
+		$image = $image->coalesceImages();
+
+		$original_image = new Imagick( $source_path );
+		$loop_count = $original_image->getImageIterations();
+		$original_image->clear();
+		$original_image->destroy();
+
+		$quality = $options['avif_quality'] ?? 70;
+		$speed = $options['avif_speed'] ?? 6;
+		$resize_width = $options['resize_width'] ?? null;
+		$resize_height = $options['resize_height'] ?? null;
+
+		$this->logger->debug( "ImageMagick version: {$version_info['version']}, AVIF capabilities: " . json_encode( $version_info['avif_capabilities'] ) );
+
+		do {
+			if ( $resize_width && $resize_height ) {
+				$image->resizeImage( $resize_width, $resize_height, Imagick::FILTER_LANCZOS, 1, true );
+			}
+
+			$image->setImageFormat( 'AVIF' );
+			$this->apply_avif_settings( $image, $version_info, $quality, $speed );
+			$image->stripImage();
+		} while ( $image->nextImage() );
+
+		$image->setFirstIterator();
+		$image->setImageIterations( $loop_count );
+
+		return $image->writeImages( $destination_path, true );
 	}
 
 	/**
@@ -351,6 +390,28 @@ class ImagickProcessor implements ImageProcessorInterface {
 	}
 
 	/**
+	 * Check if processor supports multi-frame conversion.
+	 *
+	 * @since 4.3.0
+	 * @return bool
+	 */
+	public function supports_multi_frame() {
+		return $this->supports_animated_gif()
+			|| $this->heif_probe->supports_animated_heic( $this->supports_webp() );
+	}
+
+	/**
+	 * Check if a source file contains multiple frames.
+	 *
+	 * @since 4.3.0
+	 * @param string $file_path Path to the source file.
+	 * @return bool
+	 */
+	public function is_multi_frame( $file_path ) {
+		return $this->multi_frame_detector->is_multi_frame( $file_path );
+	}
+
+	/**
 	 * Check if a GIF file is animated.
 	 *
 	 * @since TBD
@@ -358,17 +419,7 @@ class ImagickProcessor implements ImageProcessorInterface {
 	 * @return bool True if animated, false otherwise.
 	 */
 	public function is_animated_gif( $file_path ) {
-		try {
-			$image = new Imagick( $file_path );
-			$frame_count = $image->getNumberImages();
-			$image->clear();
-			$image->destroy();
-			
-			return $frame_count > 1;
-		} catch ( ImagickException $e ) {
-			$this->logger->warning( "Failed to check if GIF is animated: {$e->getMessage()}" );
-			return false;
-		}
+		return $this->is_multi_frame( $file_path );
 	}
 
 	/**

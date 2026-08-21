@@ -17,10 +17,12 @@ use FluxMedia\App\Services\FormatSupportDetector;
 use FluxMedia\App\Services\ProcessorDetector;
 use FluxMedia\FluxPlugins\Common\Services\MenuService;
 use FluxMedia\App\Http\Controllers\AdminController;
+use FluxMedia\App\Http\Controllers\AttachmentDetailsController;
 use FluxMedia\App\Http\Controllers\OptionsController;
 use FluxMedia\App\Http\Controllers\StatusController;
 use FluxMedia\App\Http\Controllers\ConversionsController;
 use FluxMedia\App\Http\Controllers\WebhookController;
+use FluxMedia\App\Services\AttachmentDetailsPresenter;
 use FluxMedia\App\Services\ExternalOptimizationProvider;
 use FluxMedia\App\Services\ConversionTracker;
 use FluxMedia\App\Services\Database;
@@ -30,6 +32,10 @@ use FluxMedia\App\Services\ActionSchedulerService;
 use FluxMedia\App\Services\CleanupService;
 use FluxMedia\App\Services\MediaLibraryStatusService;
 use FluxMedia\App\Services\ExternalApiClient;
+use FluxMedia\App\Services\ConversionRetryService;
+use FluxMedia\App\Services\ConversionOrchestrator;
+use FluxMedia\App\Services\MediaAwareRetryDelayPolicy;
+use FluxMedia\App\Services\AdminScriptUrl;
 
 /**
  * Main plugin class that initializes all components.
@@ -123,7 +129,7 @@ class Plugin {
 
         // Daily cleanup and Media Library status (admin only).
         $external_provider = null;
-        if ( Settings::is_external_service_enabled() ) {
+        if ( Settings::is_external_processing_active() ) {
             $external_provider = new ExternalOptimizationProvider( $this->logger );
         }
         $cleanup_service = new CleanupService( $this->logger, $external_provider );
@@ -140,6 +146,22 @@ class Plugin {
         $action_scheduler_service = new ActionSchedulerService( $this->logger, $service_locator, $bulk_converter );
         add_action( 'init', [ $action_scheduler_service, 'init' ], 10 );
         $this->wordpress_provider->set_action_scheduler_service( $action_scheduler_service );
+
+        // Unified conversion retries via Action Scheduler (local and cloud).
+        // @since 4.3.0
+        $delay_policy = new MediaAwareRetryDelayPolicy( $this->video_converter );
+        $conversion_orchestrator = new ConversionOrchestrator( $this->logger, $service_locator );
+        $conversion_retry_service = new ConversionRetryService(
+            $this->logger,
+            $service_locator,
+            $delay_policy,
+            $conversion_orchestrator
+        );
+        $conversion_retry_service->init();
+        $cleanup_service->set_conversion_retry_service( $conversion_retry_service );
+        $this->wordpress_provider->set_conversion_retry_service( $conversion_retry_service );
+        $this->wordpress_provider->set_conversion_orchestrator( $conversion_orchestrator );
+        $bulk_converter->set_conversion_orchestrator( $conversion_orchestrator );
         
         // Initialize WordPress provider (registers hooks)
         $this->wordpress_provider->init();
@@ -167,6 +189,8 @@ class Plugin {
         
         // Enqueue admin scripts
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts' ] );
+        // Editor / media modal surfaces call wp_enqueue_media() without hitting upload.php hooks alone.
+        add_action( 'wp_enqueue_media', [ $this, 'enqueue_attachment_bundle_for_media' ] );
     }
 
     /**
@@ -218,9 +242,12 @@ class Plugin {
         $options_controller = new OptionsController( $this->settings );
         $status_controller = new StatusController( $format_detector, $processor_detector );
         $conversions_controller = new ConversionsController( $conversion_tracker );
+        $attachment_details_presenter = new AttachmentDetailsPresenter( $format_detector );
+        $attachment_details_controller = new AttachmentDetailsController( $attachment_details_presenter );
         $options_controller->register_routes();
         $status_controller->register_routes();
         $conversions_controller->register_routes();
+        $attachment_details_controller->register_routes();
         
         // Register webhook controller only when external SaaS is active with a valid license.
         if ( Settings::should_register_webhook_route() ) {
@@ -280,40 +307,92 @@ class Plugin {
     }
 
     /**
-     * Enqueue admin scripts.
+     * Enqueue attachment React island wherever media modals or attachment screens load.
      *
      * @since 0.1.0
+     * @since 4.3.0 Shared AdminScriptUrl resolution; also hooks wp_enqueue_media for editor modals.
      * @param string $hook Current admin page hook.
      * @return void
      */
     public function enqueue_admin_scripts( $hook ) {
-        // Only enqueue on attachment pages
         if ( 'post.php' !== $hook && 'upload.php' !== $hook ) {
             return;
         }
 
-        // Check if we're on an attachment page
         global $post;
         if ( 'post.php' === $hook && ( ! $post || 'attachment' !== $post->post_type ) ) {
             return;
         }
 
-        // Enqueue attachment-specific JavaScript
+        $this->enqueue_attachment_bundle();
+    }
+
+    /**
+     * Enqueue attachment bundle when core media scripts load (editor insert/media modal).
+     *
+     * Avoids global admin loading while covering screens that call wp_enqueue_media().
+     *
+     * @since 4.3.0
+     * @return void
+     */
+    public function enqueue_attachment_bundle_for_media() {
+        if ( ! is_admin() ) {
+            return;
+        }
+
+        $this->enqueue_attachment_bundle();
+    }
+
+    /**
+     * Register and enqueue the self-contained attachment React island.
+     *
+     * Empty WordPress script dependency array is intentional: webpack bundles React,
+     * ReactDOM, MUI, Emotion, theme, and attachment components. The entry imports no
+     * `@wordpress/*` packages, so no wp-element / wp-components / wp-i18n handle must load first.
+     *
+     * @since 4.3.0
+     * @return void
+     */
+    private function enqueue_attachment_bundle() {
+        if ( wp_script_is( 'flux-media-optimizer-attachment', 'enqueued' ) ) {
+            return;
+        }
+
         wp_enqueue_script(
             'flux-media-optimizer-attachment',
-            plugin_dir_url( dirname( __FILE__ ) ) . 'assets/js/dist/attachment.bundle.js',
+            AdminScriptUrl::for_bundle( 'attachment.bundle.js' ),
             [],
             FLUX_MEDIA_OPTIMIZER_VERSION,
             true
         );
 
-        // Localize script with admin data
-        wp_localize_script( 'flux-media-optimizer-attachment', 'fluxMediaAdmin', [
-            'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-            'convertNonce' => wp_create_nonce( 'flux_media_optimizer_convert_attachment' ),
-            'disableNonce' => wp_create_nonce( 'flux_media_optimizer_disable_conversion' ),
-            'enableNonce' => wp_create_nonce( 'flux_media_optimizer_enable_conversion' ),
-        ] );
+        wp_localize_script(
+            'flux-media-optimizer-attachment',
+            'fluxMediaAdmin',
+            [
+                'apiUrl'       => rest_url( 'flux-media-optimizer/v1/' ),
+                'nonce'        => wp_create_nonce( 'wp_rest' ),
+                'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
+                'convertNonce' => wp_create_nonce( 'flux_media_optimizer_convert_attachment' ),
+                'disableNonce' => wp_create_nonce( 'flux_media_optimizer_disable_conversion' ),
+                'enableNonce'  => wp_create_nonce( 'flux_media_optimizer_enable_conversion' ),
+            ]
+        );
+
+        // Compact SSR skeleton styles until React replaces the mount.
+        // container-type enables attachment island @container queries (compact ≤480px parent).
+        // @since 4.3.0
+        $skeleton_css = '
+.flux-media-optimizer-attachment-root{max-width:100%;width:100%;overflow:hidden;box-sizing:border-box;container-type:inline-size;container-name:flux-media-attachment;}
+.flux-media-optimizer-attachment-app{max-width:100%;min-width:0;box-sizing:border-box;}
+.flux-media-optimizer-attachment-skeleton{background:#fff;border:1px solid #dcdcde;border-radius:4px;padding:12px;margin:8px 0;}
+.flux-media-optimizer-attachment-skeleton__header{height:18px;width:55%;max-width:220px;background:#f0f0f1;border-radius:3px;margin-bottom:12px;}
+.flux-media-optimizer-attachment-skeleton__row{height:12px;width:100%;background:#f0f0f1;border-radius:3px;margin-bottom:8px;}
+.flux-media-optimizer-attachment-skeleton__row--short{width:70%;margin-bottom:0;}
+';
+        wp_register_style( 'flux-media-optimizer-attachment', false, [], FLUX_MEDIA_OPTIMIZER_VERSION );
+        wp_enqueue_style( 'flux-media-optimizer-attachment' );
+        wp_add_inline_style( 'flux-media-optimizer-attachment', $skeleton_css );
     }
 
 }

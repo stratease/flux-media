@@ -34,15 +34,34 @@ class CleanupService {
 	private $external_provider;
 
 	/**
+	 * Unified conversion retry service.
+	 *
+	 * @since 4.3.0
+	 * @var ConversionRetryService|null
+	 */
+	private $conversion_retry_service;
+
+	/**
 	 * Constructor.
 	 *
 	 * @since 4.2.0
-	 * @param Logger                           $logger            Logger instance.
-	 * @param ExternalOptimizationProvider|null $external_provider External provider for retries.
+	 * @param Logger                            $logger            Logger instance.
+	 * @param ExternalOptimizationProvider|null $external_provider External provider (stale detection).
 	 */
 	public function __construct( Logger $logger, ?ExternalOptimizationProvider $external_provider = null ) {
 		$this->logger = $logger;
 		$this->external_provider = $external_provider;
+	}
+
+	/**
+	 * Inject the unified conversion retry service.
+	 *
+	 * @since 4.3.0
+	 * @param ConversionRetryService $conversion_retry_service Retry service.
+	 * @return void
+	 */
+	public function set_conversion_retry_service( ConversionRetryService $conversion_retry_service ) {
+		$this->conversion_retry_service = $conversion_retry_service;
 	}
 
 	/**
@@ -53,7 +72,6 @@ class CleanupService {
 	 */
 	public function init() {
 		add_action( 'flux_media_optimizer_cleanup', [ $this, 'run_cleanup' ] );
-		add_action( 'flux_media_optimizer_retry_failed_jobs', [ $this, 'run_retry_cleanup_only' ] );
 	}
 
 	/**
@@ -94,9 +112,10 @@ class CleanupService {
 	}
 
 	/**
-	 * Run bounded failed-job retries only (legacy hourly cron compatibility).
+	 * Run bounded failed-job retries only.
 	 *
 	 * @since 4.2.0
+	 * @deprecated 4.2.1 Daily cleanup owns retries; retained for backward compatibility.
 	 * @return array Retry summary.
 	 */
 	public function run_retry_cleanup_only() {
@@ -111,7 +130,7 @@ class CleanupService {
 	 * @return int Number of jobs marked failed.
 	 */
 	public function mark_stale_external_jobs_failed( $limit = 50 ) {
-		if ( ! Settings::is_external_service_enabled() ) {
+		if ( ! Settings::is_external_processing_active() ) {
 			return 0;
 		}
 
@@ -126,7 +145,16 @@ class CleanupService {
 			$started_at = AttachmentMetaHandler::get_external_job_started_at( $attachment_id );
 
 			if ( $started_at <= 0 ) {
-				AttachmentMetaHandler::set_external_job_started_at( $attachment_id, time() );
+				$started_at = (int) get_post_modified_time( 'U', true, $attachment_id );
+			}
+
+			if ( $started_at <= 0 ) {
+				AttachmentMetaHandler::mark_conversion_failed(
+					$attachment_id,
+					'External job missing started_at; marked stale.'
+				);
+				$marked++;
+				$this->logger->warning( "Marked external job as failed for attachment {$attachment_id} (missing started_at)" );
 				continue;
 			}
 
@@ -134,7 +162,10 @@ class CleanupService {
 				continue;
 			}
 
-			AttachmentMetaHandler::set_external_job_state( $attachment_id, 'failed' );
+			AttachmentMetaHandler::mark_conversion_failed(
+				$attachment_id,
+				'External job timed out and was marked stale.'
+			);
 			$marked++;
 			$this->logger->warning( "Marked stale external job as failed for attachment {$attachment_id} (started: {$started_at}, cutoff: {$cutoff})" );
 		}
@@ -143,9 +174,10 @@ class CleanupService {
 	}
 
 	/**
-	 * Retry failed external jobs within the configured retry limit.
+	 * Enqueue Action Scheduler retries for failed jobs within the retry limit.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Enqueues via ConversionRetryService instead of direct cloud re-submit.
 	 * @param int $limit Maximum attachments to process.
 	 * @return array Retry summary.
 	 */
@@ -156,7 +188,7 @@ class CleanupService {
 			'exhausted' => 0,
 		];
 
-		if ( ! Settings::is_external_service_enabled() || ! $this->external_provider ) {
+		if ( ! $this->conversion_retry_service ) {
 			return $summary;
 		}
 
@@ -165,18 +197,12 @@ class CleanupService {
 		$attachment_ids = $this->get_failed_attachment_ids( $limit, $retry_limit );
 
 		foreach ( $attachment_ids as $attachment_id ) {
-			$retry_count = AttachmentMetaHandler::get_external_job_retry_count( $attachment_id );
-
-			if ( ! self::is_retry_eligible( $retry_count, $retry_limit ) ) {
-				$summary['exhausted']++;
-				continue;
-			}
-
-			AttachmentMetaHandler::increment_external_job_retry_count( $attachment_id );
 			$summary['attempted']++;
 
-			if ( $this->external_provider->retry_failed_job( $attachment_id ) ) {
+			if ( $this->conversion_retry_service->schedule_retry( $attachment_id ) ) {
 				$summary['succeeded']++;
+			} else {
+				$this->logger->warning( "Failed to enqueue conversion retry for attachment {$attachment_id}" );
 			}
 		}
 
@@ -243,19 +269,13 @@ class CleanupService {
 	 * Determine whether a failed job is eligible for another retry.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Delegates to ConversionRetryService.
 	 * @param int      $retry_count Current retry count.
 	 * @param int|null $limit       Maximum retry attempts.
 	 * @return bool True if another retry is allowed.
 	 */
 	public static function is_retry_eligible( $retry_count, $limit = null ) {
-		$retry_count = (int) $retry_count;
-		$limit = null !== $limit ? (int) $limit : self::get_failed_job_retry_limit();
-
-		if ( $limit <= 0 ) {
-			return false;
-		}
-
-		return $retry_count < $limit;
+		return ConversionRetryService::is_retry_eligible( $retry_count, $limit );
 	}
 
 	/**
@@ -276,14 +296,11 @@ class CleanupService {
 	 * Get failed job retry limit.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Delegates to ConversionRetryService.
 	 * @return int Maximum retry attempts.
 	 */
 	public static function get_failed_job_retry_limit() {
-		if ( defined( 'FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT' ) ) {
-			return max( 0, (int) FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT );
-		}
-
-		return 3;
+		return ConversionRetryService::get_failed_job_retry_limit();
 	}
 
 	/**
@@ -318,7 +335,7 @@ class CleanupService {
 				'meta_query' => [
 					[
 						'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
-						'value' => [ 'queued', 'processing' ],
+						'value' => AttachmentMetaHandler::get_in_flight_job_states(),
 						'compare' => 'IN',
 					],
 				],
@@ -329,45 +346,81 @@ class CleanupService {
 	}
 
 	/**
-	 * Get failed attachment IDs eligible for retry.
+	 * Get failed attachment IDs for retry enqueue.
+	 *
+	 * Eligibility is filtered in PHP via get_retry_count() so legacy meta migrates correctly.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Drops retry-count meta_query; filters with unified get_retry_count().
 	 * @param int $limit       Maximum results.
+	 * @param int $retry_limit Maximum retry attempts (unused; kept for signature compatibility).
+	 * @return int[] Attachment IDs.
+	 */
+	/**
+	 * Query failed attachments, paginating until an eligible batch is filled.
+	 *
+	 * Exhausted retry rows cannot starve later eligible IDs: pages are scanned in
+	 * deterministic ID order and filtered with unified get_retry_count().
+	 *
+	 * @since 4.2.0
+	 * @since 4.3.0 Paginates past exhausted failures until eligible batch is filled.
+	 * @param int $limit       Maximum eligible results.
 	 * @param int $retry_limit Maximum retry attempts.
 	 * @return int[] Attachment IDs.
 	 */
 	private function get_failed_attachment_ids( $limit, $retry_limit ) {
-		$query = new \WP_Query(
-			[
-				'post_type' => 'attachment',
-				'post_status' => 'any',
-				'posts_per_page' => $limit,
-				'fields' => 'ids',
-				'no_found_rows' => true,
-				'meta_query' => [
-					'relation' => 'AND',
-					[
-						'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
-						'value' => 'failed',
-						'compare' => '=',
-					],
-					[
-						'relation' => 'OR',
-						[
-							'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_RETRY_COUNT,
-							'compare' => 'NOT EXISTS',
-						],
-						[
-							'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_RETRY_COUNT,
-							'value' => $retry_limit,
-							'compare' => '<',
-							'type' => 'NUMERIC',
-						],
-					],
-				],
-			]
-		);
+		$limit       = max( 1, (int) $limit );
+		$retry_limit = (int) $retry_limit;
+		$eligible    = [];
+		$page        = 1;
+		$max_pages   = 50;
 
-		return array_map( 'intval', $query->posts );
+		while ( count( $eligible ) < $limit && $page <= $max_pages ) {
+			$query = new \WP_Query(
+				[
+					'post_type'      => 'attachment',
+					'post_status'    => 'any',
+					'posts_per_page' => $limit,
+					'paged'          => $page,
+					'fields'         => 'ids',
+					'orderby'        => 'ID',
+					'order'          => 'ASC',
+					'no_found_rows'  => true,
+					'meta_query'     => [
+						[
+							'key'     => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
+							'value'   => 'failed',
+							'compare' => '=',
+						],
+					],
+				]
+			);
+
+			$ids = array_map( 'intval', $query->posts );
+			if ( empty( $ids ) ) {
+				break;
+			}
+
+			foreach ( $ids as $attachment_id ) {
+				if ( count( $eligible ) >= $limit ) {
+					break;
+				}
+
+				$retry_count = AttachmentMetaHandler::get_retry_count( $attachment_id );
+				if ( ! self::is_retry_eligible( $retry_count, $retry_limit ) ) {
+					continue;
+				}
+
+				$eligible[] = $attachment_id;
+			}
+
+			if ( count( $ids ) < $limit ) {
+				break;
+			}
+
+			$page++;
+		}
+
+		return $eligible;
 	}
 }

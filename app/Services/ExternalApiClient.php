@@ -42,11 +42,12 @@ class ExternalApiClient {
 	 *
 	 * @since 3.0.0
 	 * @since 4.0.0 Initialize shared API client (uses constants internally).
+	 * @since 4.3.0 Shared client reads FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_*; bootstrap aligns plugin overrides into those constants.
 	 * @param Logger $logger Logger instance.
 	 */
 	public function __construct( Logger $logger ) {
 		$this->logger = $logger;
-		// Shared API client will use constants internally (FLUX_PLUGINS_COMMON_* or FLUX_MEDIA_OPTIMIZER_* for backward compatibility).
+		// Shared client uses FLUX_PLUGINS_COMMON_EXTERNAL_SERVICE_* (aligned in flux-media-optimizer.php).
 		$this->shared_api_client = new SharedExternalApiClient( $logger );
 	}
 
@@ -58,6 +59,7 @@ class ExternalApiClient {
 	 *
 	 * @since 3.0.0
 	 * @since 4.0.0 Use shared API client's post() method.
+	 * @since 4.3.0 Reject sources outside uploads via UploadPathGuard.
 	 * @param int    $attachment_id Attachment ID.
 	 * @param array  $operations    Array of operations to perform.
 	 * @param string $mimetype     MIME type of the file.
@@ -88,9 +90,11 @@ class ExternalApiClient {
 		}
 
 		// Get original file URL from attachment ID (not CDN URL).
-		// Use get_attached_file() to get the file path, then convert to URL.
-		// This bypasses any wp_get_attachment_url filters that might return CDN URLs.
-		$file_path = get_attached_file( $attachment_id );
+		// Prefer HEIC/HEIF originals when WordPress converted the attached working copy.
+		$file_path = AttachmentSourcePathResolver::get_optimization_source_path_for_attachment( $attachment_id );
+		if ( ! $file_path ) {
+			$file_path = get_attached_file( $attachment_id );
+		}
 		if ( ! $file_path || ! file_exists( $file_path ) ) {
 			return [
 				'success' => false,
@@ -98,27 +102,26 @@ class ExternalApiClient {
 			];
 		}
 
-		// Convert file path to URL using WordPress upload directory.
-		$upload_dir = wp_upload_dir();
-		$base_dir = $upload_dir['basedir'];
-		$base_url = $upload_dir['baseurl'];
-
-		// Replace the base directory path with the base URL.
-		if ( strpos( $file_path, $base_dir ) === 0 ) {
-			$pull_file_url = str_replace( $base_dir, $base_url, $file_path );
-			// Normalize path separators for URLs.
-			$pull_file_url = str_replace( '\\', '/', $pull_file_url );
-		} else {
-			// Fallback: try wp_get_attachment_url but this might return CDN URL.
-			$pull_file_url = wp_get_attachment_url( $attachment_id );
-		}
-
-		if ( ! $pull_file_url ) {
+		// Convert file path to URL using WordPress upload directory containment checks.
+		$base_dir = UploadPathGuard::get_uploads_basedir();
+		$base_url = UploadPathGuard::get_uploads_baseurl();
+		if ( false === $base_dir || false === $base_url ) {
 			return [
 				'success' => false,
-				'error' => 'Could not get attachment URL',
+				'error' => 'Uploads directory unavailable',
 			];
 		}
+
+		$relative_path = UploadPathGuard::get_relative_path_within( $file_path, $base_dir );
+		if ( false === $relative_path || $relative_path === '' ) {
+			// Reject sources outside uploads instead of falling back to a possibly unrelated URL.
+			return [
+				'success' => false,
+				'error' => 'Attachment file path is outside the uploads directory',
+			];
+		}
+
+		$pull_file_url = $base_url . '/' . str_replace( '\\', '/', $relative_path );
 
 		// Generate webhook URL.
 		$webhook_url = WebhookController::get_webhook_url();

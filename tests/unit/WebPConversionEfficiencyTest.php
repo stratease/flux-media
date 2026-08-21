@@ -9,7 +9,7 @@
 namespace FluxMedia\Tests\Unit;
 
 use FluxMedia\App\Services\ImageConverter;
-use FluxMedia\Tests\Support\Mocks\NoopLogger;
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Services\Converter;
 use PHPUnit\Framework\TestCase;
 
@@ -32,7 +32,7 @@ class WebPConversionEfficiencyTest extends TestCase {
      * Logger instance.
      *
      * @since 0.1.0
-     * @var NoopLogger
+     * @var Logger
      */
     private $logger;
 
@@ -52,7 +52,7 @@ class WebPConversionEfficiencyTest extends TestCase {
      */
     protected function setUp(): void {
         // Create ImageConverter instance (pure business logic, no WordPress dependencies)
-        $this->logger = new NoopLogger();
+        $this->logger = Logger::get_instance();
         $this->image_converter = new ImageConverter( $this->logger );
 
         // Set test files directory
@@ -72,7 +72,7 @@ class WebPConversionEfficiencyTest extends TestCase {
                 'source_file' => __DIR__ . '/../_support/files/file_example_JPG_2500kB.jpg',
                 'options' => [
                     'quality' => 60,
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 90, // Minimum expected reduction percentage
             ],
@@ -80,7 +80,7 @@ class WebPConversionEfficiencyTest extends TestCase {
                 'source_file' => __DIR__ . '/../_support/files/file_example_JPG_2500kB.jpg',
                 'options' => [
                     'quality' => 75,
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 80, // Minimum expected reduction percentage
             ],
@@ -88,7 +88,7 @@ class WebPConversionEfficiencyTest extends TestCase {
                 'source_file' => __DIR__ . '/../_support/files/file_example_JPG_2500kB.jpg',
                 'options' => [
                     'quality' => 90,
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 40, // May not reduce size at high quality
             ],
@@ -97,7 +97,7 @@ class WebPConversionEfficiencyTest extends TestCase {
                 'source_file' => __DIR__ . '/../_support/files/file_example_PNG_3MB.png',
                 'options' => [
                     'quality' => 60,
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 90, // PNG should have significant reduction
             ],
@@ -105,7 +105,7 @@ class WebPConversionEfficiencyTest extends TestCase {
                 'source_file' => __DIR__ . '/../_support/files/file_example_PNG_3MB.png',
                 'options' => [
                     'quality' => 75,
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 90, // PNG should have significant reduction
             ],
@@ -138,7 +138,7 @@ class WebPConversionEfficiencyTest extends TestCase {
         // Arrange
         $settings = [
             'webp_quality' => $options['quality'],
-            'hybrid_approach' => $options['hybrid_approach'],
+            'image_hybrid_approach' => $options['image_hybrid_approach'],
         ];
 
         $destination_paths = [
@@ -177,7 +177,7 @@ class WebPConversionEfficiencyTest extends TestCase {
         echo "Expected minimum reduction: {$expected_reduction}%\n";
         echo "Conversion options used:\n";
         echo "  - quality: {$options['quality']}\n";
-        echo "  - hybrid_approach: " . ( $options['hybrid_approach'] ? 'true' : 'false' ) . "\n";
+        echo "  - image_hybrid_approach: " . ( $options['image_hybrid_approach'] ? 'true' : 'false' ) . "\n";
         echo "  - processor: " . ( $this->image_converter->is_available() ? 'Imagick/GD' : 'None' ) . "\n";
         echo "Full options array: " . json_encode( $options, JSON_PRETTY_PRINT ) . "\n";
         echo "Conversion result: " . json_encode( $result, JSON_PRETTY_PRINT ) . "\n";

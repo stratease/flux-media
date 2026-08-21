@@ -96,7 +96,7 @@ class MediaLibraryStatusService {
 	 * @return array Modified columns.
 	 */
 	public function register_columns( $columns ) {
-		$columns[ self::COLUMN_KEY ] = __( 'Optimization', 'flux-media-optimizer' );
+		$columns[ self::COLUMN_KEY ] = \__( 'Optimization', 'flux-media-optimizer' );
 		return $columns;
 	}
 
@@ -134,7 +134,7 @@ class MediaLibraryStatusService {
 		}
 
 		$selected = isset( $_GET[ self::FILTER_QUERY_VAR ] )
-			? sanitize_key( wp_unslash( $_GET[ self::FILTER_QUERY_VAR ] ) )
+			? \sanitize_key( wp_unslash( $_GET[ self::FILTER_QUERY_VAR ] ) )
 			: '';
 
 		echo '<label for="' . esc_attr( self::FILTER_QUERY_VAR ) . '" class="screen-reader-text">';
@@ -176,7 +176,7 @@ class MediaLibraryStatusService {
 			return;
 		}
 
-		$status = sanitize_key( wp_unslash( $_GET[ self::FILTER_QUERY_VAR ] ) );
+		$status = \sanitize_key( wp_unslash( $_GET[ self::FILTER_QUERY_VAR ] ) );
 		if ( '' === $status || ! self::is_valid_status( $status ) ) {
 			return;
 		}
@@ -197,11 +197,18 @@ class MediaLibraryStatusService {
 	 * @return string Status key.
 	 */
 	public function get_status( $attachment_id ) {
+		$video_deferred = (bool) get_post_meta(
+			$attachment_id,
+			ConversionOrchestrator::META_VIDEO_DEFERRED,
+			true
+		);
+
 		return self::derive_status(
 			AttachmentMetaHandler::is_conversion_disabled( $attachment_id ),
 			AttachmentMetaHandler::get_external_job_state( $attachment_id ),
 			AttachmentMetaHandler::get_converted_formats( $attachment_id ),
-			AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id )
+			AttachmentMetaHandler::get_converted_files_grouped_by_size( $attachment_id ),
+			$video_deferred
 		);
 	}
 
@@ -209,18 +216,20 @@ class MediaLibraryStatusService {
 	 * Derive optimization status from attachment meta values.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Accepts local video-deferred flag as Pending.
 	 * @param bool        $conversion_disabled Whether conversion is disabled.
 	 * @param string|null $job_state External job state.
 	 * @param array       $converted_formats Converted format list.
 	 * @param array       $converted_files_by_size Converted files grouped by size.
+	 * @param bool        $video_deferred Whether local video work is deferred to cron.
 	 * @return string Status key.
 	 */
-	public static function derive_status( $conversion_disabled, $job_state, array $converted_formats, array $converted_files_by_size ) {
+	public static function derive_status( $conversion_disabled, $job_state, array $converted_formats, array $converted_files_by_size, $video_deferred = false ) {
 		if ( $conversion_disabled ) {
 			return self::STATUS_DISABLED;
 		}
 
-		if ( in_array( $job_state, [ 'queued', 'processing' ], true ) ) {
+		if ( AttachmentMetaHandler::is_in_flight_job_state( $job_state ) || $video_deferred ) {
 			return self::STATUS_PENDING;
 		}
 
@@ -243,11 +252,11 @@ class MediaLibraryStatusService {
 	 */
 	public static function get_status_options() {
 		return [
-			self::STATUS_OPTIMIZED => __( 'Optimized', 'flux-media-optimizer' ),
-			self::STATUS_PENDING => __( 'Pending', 'flux-media-optimizer' ),
-			self::STATUS_FAILED => __( 'Failed', 'flux-media-optimizer' ),
-			self::STATUS_DISABLED => __( 'Disabled', 'flux-media-optimizer' ),
-			self::STATUS_UNPROCESSED => __( 'Unprocessed', 'flux-media-optimizer' ),
+			self::STATUS_OPTIMIZED => \__( 'Optimized', 'flux-media-optimizer' ),
+			self::STATUS_PENDING => \__( 'Pending', 'flux-media-optimizer' ),
+			self::STATUS_FAILED => \__( 'Failed', 'flux-media-optimizer' ),
+			self::STATUS_DISABLED => \__( 'Disabled', 'flux-media-optimizer' ),
+			self::STATUS_UNPROCESSED => \__( 'Unprocessed', 'flux-media-optimizer' ),
 		];
 	}
 
@@ -259,7 +268,7 @@ class MediaLibraryStatusService {
 	 * @return string Normalized status key or empty string.
 	 */
 	public static function normalize_status_key( $status ) {
-		$status = sanitize_key( $status );
+		$status = \sanitize_key( $status );
 		return self::is_valid_status( $status ) ? $status : '';
 	}
 
@@ -296,7 +305,7 @@ class MediaLibraryStatusService {
 				return [
 					[
 						'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
-						'value' => [ 'queued', 'processing' ],
+						'value' => AttachmentMetaHandler::get_in_flight_job_states(),
 						'compare' => 'IN',
 					],
 				];
@@ -346,7 +355,7 @@ class MediaLibraryStatusService {
 						],
 						[
 							'key' => AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE,
-							'value' => [ 'queued', 'processing', 'failed' ],
+							'value' => array_merge( AttachmentMetaHandler::get_in_flight_job_states(), [ 'failed' ] ),
 							'compare' => 'NOT IN',
 						],
 					],
@@ -368,6 +377,7 @@ class MediaLibraryStatusService {
 	 * Build status badge HTML for an attachment.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Failed badges include conversion error as title tooltip.
 	 * @param int $attachment_id Attachment ID.
 	 * @return string Escapable HTML string.
 	 */
@@ -376,8 +386,16 @@ class MediaLibraryStatusService {
 		$labels = self::get_status_options();
 		$label = $labels[ $status ] ?? $status;
 		$secondary = $this->get_secondary_status_text( $attachment_id, $status );
+		$error = self::STATUS_FAILED === $status
+			? AttachmentMetaHandler::get_conversion_error( $attachment_id )
+			: '';
 
-		$html = '<span class="flux-media-optimizer-status flux-media-optimizer-status--' . esc_attr( $status ) . '">';
+		$title_attr = '';
+		if ( '' !== $error ) {
+			$title_attr = ' title="' . esc_attr( $error ) . '"';
+		}
+
+		$html = '<span class="flux-media-optimizer-status flux-media-optimizer-status--' . esc_attr( $status ) . '"' . $title_attr . '>';
 		$html .= '<strong>' . esc_html( $label ) . '</strong>';
 
 		if ( '' !== $secondary ) {
@@ -418,12 +436,12 @@ class MediaLibraryStatusService {
 			return '';
 		}
 
-		$retry_count = AttachmentMetaHandler::get_external_job_retry_count( $attachment_id );
-		$retry_limit = CleanupService::get_failed_job_retry_limit();
+		$retry_count = AttachmentMetaHandler::get_retry_count( $attachment_id );
+		$retry_limit = ConversionRetryService::get_failed_job_retry_limit();
 
 		return sprintf(
 			/* translators: 1: current retry count, 2: maximum retry attempts */
-			__( 'Retry %1$d/%2$d', 'flux-media-optimizer' ),
+			\__( 'Retry %1$d/%2$d', 'flux-media-optimizer' ),
 			$retry_count,
 			$retry_limit
 		);

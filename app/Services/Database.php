@@ -66,25 +66,51 @@ class Database {
 	}
 
 	/**
+	 * Table names managed by this plugin (current and legacy).
+	 *
+	 * @since 4.2.1
+	 * @return string[] Fully qualified table names.
+	 */
+	public static function get_table_names() {
+		global $wpdb;
+
+		return [
+			$wpdb->prefix . 'flux_media_optimizer_conversions',
+			$wpdb->prefix . 'flux_media_optimizer_logs',
+			$wpdb->prefix . 'flux_media_optimizer_external_jobs',
+			$wpdb->prefix . 'flux_media_optimizer_settings',
+		];
+	}
+
+	/**
 	 * Drop all Flux Media Optimizer database tables.
 	 *
 	 * @since 0.1.0
+	 * @since 4.2.1 Use validated identifier SQL instead of prepared %s placeholders.
 	 */
 	public static function drop_tables() {
+		foreach ( self::get_table_names() as $table ) {
+			self::drop_table_if_exists( $table );
+		}
+
+		delete_option( 'flux_media_optimizer_db_version' );
+	}
+
+	/**
+	 * Drop a database table when the name is a safe SQL identifier.
+	 *
+	 * @since 4.2.1
+	 * @param string $table Fully qualified table name.
+	 * @return void
+	 */
+	public static function drop_table_if_exists( $table ) {
 		global $wpdb;
 
-		$conversions_table = $wpdb->prefix . 'flux_media_optimizer_conversions';
-		$logs_table = $wpdb->prefix . 'flux_media_optimizer_logs';
-		$external_jobs_table = $wpdb->prefix . 'flux_media_optimizer_external_jobs';
+		if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) {
+			return;
+		}
 
-		$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %s", $conversions_table ) );
-		// Legacy per-plugin logs table (replaced by flux_plugins_logs in flux-plugins-common).
-		$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %s", $logs_table ) );
-		// Drop external_jobs table if it exists (legacy table, no longer used).
-		$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %s", $external_jobs_table ) );
-
-		// Remove database version option
-		delete_option( 'flux_media_optimizer_db_version' );
+		$wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 	}
 
 	/**

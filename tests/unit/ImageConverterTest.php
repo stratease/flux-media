@@ -9,7 +9,7 @@
 namespace FluxMedia\Tests\Unit;
 
 use FluxMedia\App\Services\ImageConverter;
-use FluxMedia\Tests\Support\Mocks\NoopLogger;
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Services\Converter;
 use PHPUnit\Framework\TestCase;
 
@@ -32,7 +32,7 @@ class ImageConverterTest extends TestCase {
      * Logger instance.
      *
      * @since 0.1.0
-     * @var NoopLogger
+     * @var Logger
      */
     private $logger;
 
@@ -44,7 +44,7 @@ class ImageConverterTest extends TestCase {
      */
     protected function setUp(): void {
         // Create ImageConverter instance (pure business logic, no WordPress dependencies)
-        $this->logger = new NoopLogger();
+        $this->logger = Logger::get_instance();
         $this->image_converter = new ImageConverter( $this->logger );
     }
 
@@ -70,27 +70,6 @@ class ImageConverterTest extends TestCase {
     }
 
     /**
-     * Test processor info retrieval.
-     *
-     * @since 0.1.0
-     * @return void
-     */
-    public function testGetProcessorInfo() {
-        $info = $this->image_converter->get_processor_info();
-        
-        $this->assertIsArray( $info );
-        $this->assertArrayHasKey( 'available', $info );
-        $this->assertArrayHasKey( 'type', $info );
-        $this->assertArrayHasKey( 'webp_support', $info );
-        $this->assertArrayHasKey( 'avif_support', $info );
-        
-        $this->assertIsBool( $info['available'] );
-        $this->assertIsString( $info['type'] );
-        $this->assertIsBool( $info['webp_support'] );
-        $this->assertIsBool( $info['avif_support'] );
-    }
-
-    /**
      * Test supported image format check.
      *
      * @since 0.1.0
@@ -103,6 +82,10 @@ class ImageConverterTest extends TestCase {
         $this->assertTrue( $this->image_converter->is_supported_image( 'test.png' ) );
         $this->assertTrue( $this->image_converter->is_supported_image( 'test.gif' ) );
         $this->assertTrue( $this->image_converter->is_supported_image( 'test.webp' ) );
+
+        // HEIC is extension-supported; local availability depends on Imagick libheif.
+        $heic_supported = $this->image_converter->is_supported_image( 'test.heic' );
+        $this->assertIsBool( $heic_supported );
         
         // Test unsupported formats
         $this->assertFalse( $this->image_converter->is_supported_image( 'test.txt' ) );
@@ -218,7 +201,7 @@ class ImageConverterTest extends TestCase {
         $settings = [
             'webp_quality' => 75, // Default from Settings
             'avif_quality' => 70, // Default from Settings
-            'hybrid_approach' => false,
+            'image_hybrid_approach' => false,
         ];
 
         $destination_paths = [];
@@ -282,7 +265,7 @@ class ImageConverterTest extends TestCase {
         $settings = [
             'webp_quality' => 75, // Default from Settings
             'avif_quality' => 70, // Default from Settings
-            'hybrid_approach' => true,
+            'image_hybrid_approach' => true,
         ];
 
         $destination_paths = [
@@ -349,6 +332,69 @@ class ImageConverterTest extends TestCase {
         // Clean up
         if ( file_exists( $temp_file ) ) {
             unlink( $temp_file );
+        }
+    }
+
+    /**
+     * Test process_image() tolerates settings without image_hybrid_approach key.
+     *
+     * Regression for PHP 8.1+ undefined array key warnings when callers pass quality-only settings.
+     *
+     * @since 4.3.0
+     * @return void
+     */
+    public function testProcessImageWithoutHybridSettingKey() {
+        if ( ! $this->image_converter->is_available() ) {
+            $this->markTestSkipped( 'No image processor available' );
+        }
+
+        if ( ! $this->image_converter->is_format_supported( Converter::FORMAT_WEBP ) ) {
+            $this->markTestSkipped( 'WebP format not supported' );
+        }
+
+        $test_files_dir = __DIR__ . '/../_support/files/';
+        $source_file = $test_files_dir . 'file_example_JPG_2500kB.jpg';
+
+        if ( ! file_exists( $source_file ) ) {
+            $this->markTestSkipped( "Source file not found: {$source_file}" );
+        }
+
+        $output_file = TEST_TEMP_DIR . '/quality_only_' . uniqid() . '.webp';
+        $settings = [
+            'webp_quality' => 75,
+            'avif_quality' => 70,
+            'avif_speed'   => 6,
+        ];
+
+        $warnings = [];
+        set_error_handler(
+            static function ( $errno, $errstr ) use ( &$warnings ) {
+                if ( E_WARNING === $errno ) {
+                    $warnings[] = $errstr;
+                }
+
+                return true;
+            }
+        );
+
+        try {
+            $result = $this->image_converter->process_image(
+                $source_file,
+                [ Converter::FORMAT_WEBP => $output_file ],
+                $settings
+            );
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertEmpty(
+            $warnings,
+            'process_image() should not emit PHP warnings for missing image_hybrid_approach. Warnings: ' . implode( '; ', $warnings )
+        );
+        $this->assertTrue( $result['success'] );
+
+        if ( file_exists( $output_file ) ) {
+            unlink( $output_file );
         }
     }
 

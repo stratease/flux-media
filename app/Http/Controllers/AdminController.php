@@ -9,6 +9,7 @@
 namespace FluxMedia\App\Http\Controllers;
 
 use FluxMedia\App\Services\Settings;
+use FluxMedia\App\Services\AdminScriptUrl;
 use FluxMedia\FluxPlugins\Common\Services\MenuService;
 
 /**
@@ -124,54 +125,22 @@ class AdminController {
 	 *
 	 * @since 0.1.0
 	 * @since 4.2.0 Dev URL from `FLUX_MEDIA_OPTIMIZER_DEV_SCRIPT_BASE` only; no hardcoded localhost in plugin.
+	 * @since 4.3.0 Delegates to AdminScriptUrl shared resolver.
 	 * @return string Script URL.
 	 */
 	private function get_script_url() {
-		$dev = $this->dev_script_url( 'admin.bundle.js' );
-		if ( null !== $dev ) {
-			return $dev;
-		}
-
-		return FLUX_MEDIA_OPTIMIZER_PLUGIN_URL . 'assets/js/dist/admin.bundle.js';
-	}
-
-	/**
-	 * Optional dev webpack base URL (set in `wp-config.php` only).
-	 *
-	 * When defined, non-empty, and `WP_DEBUG` + `SCRIPT_DEBUG` are true, admin bundles load from this base
-	 * instead of `assets/js/dist/`. Plugin PHP must not embed fixed localhost URLs.
-	 *
-	 * @since 4.2.0
-	 * @param string $filename Bundle file name (e.g. `admin.bundle.js`).
-	 * @return string|null Full URL, or null to use shipped `assets/js/dist/` files.
-	 */
-	private function dev_script_url( string $filename ): ?string {
-		if ( ! $this->is_dev_script_base_configured() ) {
-			return null;
-		}
-
-		$base = rtrim( (string) constant( 'FLUX_MEDIA_OPTIMIZER_DEV_SCRIPT_BASE' ), '/' );
-		$file = ltrim( $filename, '/' );
-
-		return $base . '/' . $file;
+		return AdminScriptUrl::for_bundle( 'admin.bundle.js' );
 	}
 
 	/**
 	 * Whether dev script base is configured for loading bundles from an external dev server.
 	 *
 	 * @since 4.2.0
+	 * @since 4.3.0 Delegates to AdminScriptUrl.
 	 * @return bool
 	 */
 	private function is_dev_script_base_configured(): bool {
-		if ( ! defined( 'WP_DEBUG' ) || ! WP_DEBUG || ! defined( 'SCRIPT_DEBUG' ) || ! SCRIPT_DEBUG ) {
-			return false;
-		}
-
-		if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_DEV_SCRIPT_BASE' ) || ! is_string( constant( 'FLUX_MEDIA_OPTIMIZER_DEV_SCRIPT_BASE' ) ) ) {
-			return false;
-		}
-
-		return '' !== trim( (string) constant( 'FLUX_MEDIA_OPTIMIZER_DEV_SCRIPT_BASE' ) );
+		return AdminScriptUrl::is_dev_script_base_configured();
 	}
 
 	/**

@@ -1,36 +1,43 @@
 <?php
 /**
- * Codeception bootstrap file for Flux Media Optimizer plugin tests.
- * Focuses on testing pure business logic components without WordPress dependencies.
+ * PHPUnit bootstrap for Flux Media Optimizer plugin tests.
  *
  * @package FluxMedia
  * @since 0.1.0
  */
 
-// Load Composer autoloader
 require_once dirname( __DIR__ ) . '/vendor/autoload.php';
+require_once __DIR__ . '/Support/wordpress-stubs.php';
 
-// Set up test environment for pure business logic testing
-define( 'TEST_TEMP_DIR', sys_get_temp_dir() . '/flux-media-optimizer-tests' );
-
-// Create test temp directory if it doesn't exist
-if ( ! is_dir( TEST_TEMP_DIR ) ) {
-    mkdir( TEST_TEMP_DIR, 0755, true );
+if ( ! defined( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR' ) ) {
+	define( 'FLUX_MEDIA_OPTIMIZER_PLUGIN_DIR', dirname( __DIR__ ) . '/' );
 }
 
-// Clean up test files after tests
-register_shutdown_function( function() {
-    if ( is_dir( TEST_TEMP_DIR ) ) {
-        $files = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator( TEST_TEMP_DIR, RecursiveDirectoryIterator::SKIP_DOTS ),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
-        
-        foreach ( $files as $fileinfo ) {
-            $todo = ( $fileinfo->isDir() ? 'rmdir' : 'unlink' );
-            $todo( $fileinfo->getRealPath() );
-        }
-        
-        rmdir( TEST_TEMP_DIR );
-    }
-} );
+// Strauss leaves php-ffmpeg PSR-0 paths misaligned; register the same autoloader as production.
+\FluxMedia\App\Services\FFmpegAutoloader::init();
+
+define( 'TEST_TEMP_DIR', sys_get_temp_dir() . '/flux-media-optimizer-tests' );
+
+if ( ! is_dir( TEST_TEMP_DIR ) ) {
+	mkdir( TEST_TEMP_DIR, 0755, true );
+}
+
+register_shutdown_function(
+	static function () {
+		if ( ! is_dir( TEST_TEMP_DIR ) ) {
+			return;
+		}
+
+		$files = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator( TEST_TEMP_DIR, RecursiveDirectoryIterator::SKIP_DOTS ),
+			RecursiveIteratorIterator::CHILD_FIRST
+		);
+
+		foreach ( $files as $fileinfo ) {
+			$todo = ( $fileinfo->isDir() ? 'rmdir' : 'unlink' );
+			$todo( $fileinfo->getRealPath() );
+		}
+
+		rmdir( TEST_TEMP_DIR );
+	}
+);

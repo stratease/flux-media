@@ -44,6 +44,14 @@ class BulkConverter {
 	private $conversion_tracker;
 
 	/**
+	 * Shared conversion orchestrator.
+	 *
+	 * @since 4.3.0
+	 * @var ConversionOrchestrator|null
+	 */
+	private $conversion_orchestrator;
+
+	/**
 	 * Constructor.
 	 *
 	 * @since 0.1.0
@@ -53,9 +61,10 @@ class BulkConverter {
 	 * @param ConversionTracker             $conversion_tracker Conversion tracker service.
 	 */
 	public function __construct( Logger $logger, MediaProcessingServiceLocator $service_locator, ConversionTracker $conversion_tracker ) {
-		$this->logger = $logger;
-		$this->service_locator = $service_locator;
-		$this->conversion_tracker = $conversion_tracker;
+		$this->logger                   = $logger;
+		$this->service_locator          = $service_locator;
+		$this->conversion_tracker       = $conversion_tracker;
+		$this->conversion_orchestrator  = null;
 	}
 
 	/**
@@ -177,30 +186,37 @@ class BulkConverter {
 	/**
 	 * Get unconverted media files.
 	 *
-	 * Retrieves all attachment types that haven't been converted and aren't disabled.
-	 * The processor will determine if each attachment should be processed.
+	 * Retrieves attachments that haven't been converted and aren't disabled.
+	 * Failed attachments are excluded — they use ConversionRetryService instead.
 	 *
 	 * @since 0.1.0
 	 * @since 3.0.0 Made public for use by Action Scheduler service.
 	 * @since 4.0.0 Updated to handle all media types, not just images and videos.
+	 * @since 4.3.0 Excludes failed job state so permanent failures cannot bypass retry limits.
 	 * @param int $limit Maximum number of files to return.
 	 * @return array Array of attachment IDs.
 	 */
 	public function get_unconverted_media( $limit = 10 ) {
 		global $wpdb;
 
-		// Get all attachments that haven't been converted and aren't disabled.
-		// The processor will determine if each attachment should be processed.
+		$failed_state = 'failed';
+		$state_key    = AttachmentMetaHandler::META_KEY_EXTERNAL_JOB_STATE;
+
+		// Get attachments that haven't been converted, aren't disabled, and aren't failed.
 		$attachments = $wpdb->get_col( $wpdb->prepare(
 			"SELECT p.ID 
 			 FROM {$wpdb->posts} p 
 			 LEFT JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_flux_media_optimizer_converted_formats'
 			 LEFT JOIN {$wpdb->postmeta} pm_disabled ON p.ID = pm_disabled.post_id AND pm_disabled.meta_key = '_flux_media_optimizer_conversion_disabled'
+			 LEFT JOIN {$wpdb->postmeta} pm_failed ON p.ID = pm_failed.post_id AND pm_failed.meta_key = %s
 			 WHERE p.post_type = 'attachment' 
 			 AND (pm.meta_value IS NULL OR pm.meta_value = '')
 			 AND (pm_disabled.meta_value IS NULL OR pm_disabled.meta_value = '')
+			 AND (pm_failed.meta_value IS NULL OR pm_failed.meta_value != %s)
 			 ORDER BY p.post_date DESC
 			 LIMIT %d",
+			$state_key,
+			$failed_state,
 			$limit
 		) );
 
@@ -217,21 +233,37 @@ class BulkConverter {
 	 * @param int $attachment_id Attachment ID.
 	 * @return bool True if conversion was initiated successfully, false otherwise.
 	 */
+
+	/**
+	 * Set the shared conversion orchestrator.
+	 *
+	 * @since 4.3.0
+	 * @param ConversionOrchestrator $conversion_orchestrator Orchestrator.
+	 * @return void
+	 */
+	public function set_conversion_orchestrator( ConversionOrchestrator $conversion_orchestrator ) {
+		$this->conversion_orchestrator = $conversion_orchestrator;
+	}
+
 	public function process_attachment( $attachment_id ) {
-		// Check if conversion is disabled for this attachment
 		if ( AttachmentMetaHandler::is_conversion_disabled( $attachment_id ) ) {
 			$this->logger->info( "Attachment conversion skipped: Conversion disabled for attachment {$attachment_id}" );
 			return false;
 		}
 
-		// Get processor service
+		if ( $this->conversion_orchestrator ) {
+			$result = $this->conversion_orchestrator->dispatch(
+				new ConversionRequest( (int) $attachment_id, ConversionRequest::TRIGGER_BULK )
+			);
+			return $result->is_completed() || $result->is_in_flight();
+		}
+
 		$processor = $this->service_locator->get_processor();
 		if ( ! $processor ) {
 			$this->logger->error( "Processor not available for attachment conversion (attachment: {$attachment_id})" );
 			return false;
 		}
 
-		// Process the attachment - processor will determine if it should be processed
 		return $processor->process( $attachment_id );
 	}
 

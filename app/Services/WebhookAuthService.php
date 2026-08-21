@@ -28,14 +28,6 @@ class WebhookAuthService {
 	}
 
 	/**
-	 * In-flight external job states that accept webhook updates.
-	 *
-	 * @since 4.1.6
-	 * @var string[]
-	 */
-	private const IN_FLIGHT_JOB_STATES = [ 'queued', 'processing' ];
-
-	/**
 	 * Verify a webhook REST request (permission_callback).
 	 *
 	 * @since 4.1.6
@@ -174,7 +166,7 @@ class WebhookAuthService {
 			return false;
 		}
 
-		return in_array( $current_state, self::IN_FLIGHT_JOB_STATES, true );
+		return AttachmentMetaHandler::is_in_flight_job_state( $current_state );
 	}
 
 	/**
@@ -223,11 +215,17 @@ class WebhookAuthService {
 	 * Validate a single URL host against the allowlist.
 	 *
 	 * @since 4.1.6
+	 * @since 4.3.0 Require HTTPS scheme before host allowlist checks.
 	 * @param string   $url           Sanitized URL.
 	 * @param string[] $allowed_hosts Lowercase hostnames (no port).
 	 * @return true|string True on success, error message on failure.
 	 */
 	public static function validate_url_host( $url, array $allowed_hosts ) {
+		$scheme = self::extract_url_scheme( $url );
+		if ( 'https' !== $scheme ) {
+			return 'CDN URL must use HTTPS';
+		}
+
 		$host = self::extract_url_host( $url );
 		if ( $host === '' ) {
 			return 'Could not parse CDN URL host';
@@ -238,6 +236,27 @@ class WebhookAuthService {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Extract lowercase URL scheme.
+	 *
+	 * @since 4.3.0
+	 * @param string $url URL string.
+	 * @return string Scheme or empty string.
+	 */
+	public static function extract_url_scheme( $url ) {
+		if ( function_exists( 'wp_parse_url' ) ) {
+			$parsed = wp_parse_url( $url );
+		} else {
+			$parsed = parse_url( $url );
+		}
+
+		if ( ! is_array( $parsed ) || empty( $parsed['scheme'] ) ) {
+			return '';
+		}
+
+		return strtolower( (string) $parsed['scheme'] );
 	}
 
 	/**
@@ -335,6 +354,7 @@ class WebhookAuthService {
 	 * Check webhook rate limit for an account (increments counter on success).
 	 *
 	 * @since 4.1.6
+	 * @since 4.3.0 Non-positive limit/window constants fail closed.
 	 * @param string $account_id Site account ID.
 	 * @return bool True if request is within limit.
 	 */
@@ -352,13 +372,13 @@ class WebhookAuthService {
 			: 60;
 
 		if ( $max_requests <= 0 || $window_seconds <= 0 ) {
-			return true;
+			return false;
 		}
 
 		$key = self::build_rate_limit_transient_key( $account_id );
 		$count = (int) get_transient( $key );
 
-		if ( $count >= $max_requests ) {
+		if ( ! self::is_within_rate_limit( $count, $max_requests ) ) {
 			return false;
 		}
 
@@ -381,12 +401,20 @@ class WebhookAuthService {
 	/**
 	 * Determine whether request count is within the configured limit (pure helper for tests).
 	 *
+	 * Invalid or non-positive max values fail closed.
+	 *
 	 * @since 4.1.6
+	 * @since 4.3.0 Reject non-positive max request values.
 	 * @param int $current_count Current request count in the window.
 	 * @param int $max_requests  Maximum allowed requests.
 	 * @return bool True if another request is allowed.
 	 */
 	public static function is_within_rate_limit( $current_count, $max_requests ) {
-		return $current_count < $max_requests;
+		$max_requests = (int) $max_requests;
+		if ( $max_requests <= 0 ) {
+			return false;
+		}
+
+		return (int) $current_count < $max_requests;
 	}
 }

@@ -12,19 +12,12 @@
     </testsuites>
     <coverage>
         <include>
-            <directory suffix=".php">src/Services</directory>
-            <directory suffix=".php">src/Processors</directory>
-            <directory suffix=".php">src/Utils</directory>
-            <file>src/Core/Settings.php</file>
+            <directory suffix=".php">app/Services</directory>
+            <directory suffix=".php">app/Http</directory>
+            <file>app/Plugin.php</file>
         </include>
         <exclude>
-            <directory>src/Core/Plugin.php</directory>
-            <directory>src/Admin</directory>
-            <directory>src/Public</directory>
-            <directory>src/Api</directory>
-            <directory>src/Providers</directory>
-            <directory>src/Interfaces</directory>
-            <directory>src/Adapters</directory>
+            <directory>app/Console</directory>
         </exclude>
     </coverage>
 </phpunit>

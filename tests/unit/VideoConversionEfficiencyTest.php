@@ -9,7 +9,7 @@
 namespace FluxMedia\Tests\Unit;
 
 use FluxMedia\App\Services\VideoConverter;
-use FluxMedia\Tests\Support\Mocks\NoopLogger;
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -31,7 +31,7 @@ class VideoConversionEfficiencyTest extends TestCase {
      * Logger instance.
      *
      * @since 0.1.0
-     * @var NoopLogger
+     * @var Logger|\PHPUnit\Framework\MockObject\MockObject
      */
     private $logger;
 
@@ -47,11 +47,13 @@ class VideoConversionEfficiencyTest extends TestCase {
      * Set up test environment.
      *
      * @since 0.1.0
+     * @since 4.3.0 Uses suite Logger mock (private constructor; disableOriginalConstructor).
      * @return void
      */
     protected function setUp(): void {
-        // Create VideoConverter instance (pure business logic, no WordPress dependencies)
-        $this->logger = new NoopLogger();
+        $this->logger = $this->getMockBuilder( Logger::class )
+            ->disableOriginalConstructor()
+            ->getMock();
         $this->video_converter = new VideoConverter( $this->logger );
 
         // Create mock video files with different sizes

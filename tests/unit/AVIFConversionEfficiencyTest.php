@@ -9,7 +9,7 @@
 namespace FluxMedia\Tests\Unit;
 
 use FluxMedia\App\Services\ImageConverter;
-use FluxMedia\Tests\Support\Mocks\NoopLogger;
+use FluxMedia\FluxPlugins\Common\Logger\Logger;
 use FluxMedia\App\Services\Converter;
 use PHPUnit\Framework\TestCase;
 
@@ -32,7 +32,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
      * Logger instance.
      *
      * @since 0.1.0
-     * @var NoopLogger
+     * @var Logger
      */
     private $logger;
 
@@ -52,7 +52,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
      */
     protected function setUp(): void {
         // Create ImageConverter instance (pure business logic, no WordPress dependencies)
-        $this->logger = new NoopLogger();
+        $this->logger = Logger::get_instance();
         $this->image_converter = new ImageConverter( $this->logger );
 
         // Set test files directory
@@ -73,7 +73,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
                 'options' => [
                     'quality' => 50,
                     'speed' => 0, // Slowest compression, best quality
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 65, // AVIF should provide excellent compression
             ],
@@ -82,7 +82,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
                 'options' => [
                     'quality' => 70,
                     'speed' => 2, // Balanced speed/quality
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 65, // AVIF should provide good compression
             ],
@@ -91,7 +91,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
                 'options' => [
                     'quality' => 80,
                     'speed' => 4, // Faster compression
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 65, // May not reduce size at high quality
             ],
@@ -100,7 +100,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
                 'options' => [
                     'quality' => 80,
                     'speed' => 0, // Faster compression
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 90, // May not reduce size at high quality
             ],
@@ -110,7 +110,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
                 'options' => [
                     'quality' => 50,
                     'speed' => 0, // Slowest compression, best quality
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 90, // PNG to AVIF should have excellent compression
             ],
@@ -119,7 +119,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
                 'options' => [
                     'quality' => 70,
                     'speed' => 2, // Balanced speed/quality
-                    'hybrid_approach' => false,
+                    'image_hybrid_approach' => false,
                 ],
                 'expected_reduction' => 90, // PNG to AVIF should have good compression
             ],
@@ -153,7 +153,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
         $settings = [
             'avif_quality' => $options['quality'],
             'avif_speed' => $options['speed'],
-            'hybrid_approach' => $options['hybrid_approach'],
+            'image_hybrid_approach' => $options['image_hybrid_approach'],
         ];
 
         $destination_paths = [
@@ -194,7 +194,7 @@ class AVIFConversionEfficiencyTest extends TestCase {
         echo "Conversion options used:\n";
         echo "  - quality: {$options['quality']}\n";
         echo "  - speed: {$options['speed']}\n";
-        echo "  - hybrid_approach: " . ( $options['hybrid_approach'] ? 'true' : 'false' ) . "\n";
+        echo "  - image_hybrid_approach: " . ( $options['image_hybrid_approach'] ? 'true' : 'false' ) . "\n";
         echo "  - processor: " . ( $this->image_converter->is_available() ? 'Imagick/GD' : 'None' ) . "\n";
         echo "Full options array: " . json_encode( $options, JSON_PRETTY_PRINT ) . "\n";
         echo "Conversion result: " . json_encode( $result, JSON_PRETTY_PRINT ) . "\n";

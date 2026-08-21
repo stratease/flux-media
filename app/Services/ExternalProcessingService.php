@@ -200,56 +200,66 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 	 * @return void
 	 */
 	private function submit_processing_job( $attachment_id, $file_path ) {
+		$resolver              = new AttachmentSourcePathResolver( $this->logger );
+		$optimization_path     = $resolver->get_optimization_source_path( $attachment_id );
+		$original_file_path    = null;
+
+		if ( ! empty( $optimization_path ) && file_exists( $optimization_path ) ) {
+			$original_file_path = $optimization_path;
+		}
+
 		// Determine the original file path with priority:
-		// 1. Use $file_path if it's a valid local file (first upload scenario)
-		// 2. Fall back to get_attached_file() (WordPress stored path)
-		// 3. Fall back to constructing from metadata (_wp_attached_file)
-		$original_file_path = null;
-		
-		// First, check if the passed $file_path is a valid local file.
-		// On first upload, this is the actual file that was just uploaded.
-		if ( ! empty( $file_path ) && 
-		     strpos( $file_path, 'http://' ) !== 0 && 
-		     strpos( $file_path, 'https://' ) !== 0 && 
-		     file_exists( $file_path ) ) {
-			$original_file_path = $file_path;
-		}
-		
-		// If $file_path is not valid, try get_attached_file().
+		// 1. Optimization source (HEIC/HEIF original when applicable)
+		// 2. Use $file_path if it's a valid local file (first upload scenario)
+		// 3. Fall back to get_attached_file() (WordPress stored path)
+		// 4. Fall back to constructing from metadata (_wp_attached_file)
 		if ( empty( $original_file_path ) ) {
-			$original_file_path = get_attached_file( $attachment_id );
-			
-			// Validate it's a local file and exists.
-			if ( ! empty( $original_file_path ) && 
-			     ( strpos( $original_file_path, 'http://' ) === 0 || strpos( $original_file_path, 'https://' ) === 0 || ! file_exists( $original_file_path ) ) ) {
-				$original_file_path = null;
+			// On first upload, this is the actual file that was just uploaded.
+			if ( ! empty( $file_path ) &&
+			     strpos( $file_path, 'http://' ) !== 0 &&
+			     strpos( $file_path, 'https://' ) !== 0 &&
+			     file_exists( $file_path ) ) {
+				$original_file_path = $file_path;
 			}
-		}
-		
-		// If still empty, try constructing from metadata.
-		if ( empty( $original_file_path ) ) {
-			$upload_dir = wp_upload_dir();
-			$attached_file_meta = get_post_meta( $attachment_id, '_wp_attached_file', true );
-			
-			if ( ! empty( $attached_file_meta ) ) {
-				$constructed_path = $upload_dir['basedir'] . '/' . $attached_file_meta;
-				if ( file_exists( $constructed_path ) ) {
-					$original_file_path = $constructed_path;
+
+			// If $file_path is not valid, try get_attached_file().
+			if ( empty( $original_file_path ) ) {
+				$original_file_path = get_attached_file( $attachment_id );
+
+				// Validate it's a local file and exists.
+				if ( ! empty( $original_file_path ) &&
+				     ( strpos( $original_file_path, 'http://' ) === 0 || strpos( $original_file_path, 'https://' ) === 0 || ! file_exists( $original_file_path ) ) ) {
+					$original_file_path = null;
+				}
+			}
+
+			// If still empty, try constructing from metadata.
+			if ( empty( $original_file_path ) ) {
+				$upload_dir = wp_upload_dir();
+				$attached_file_meta = get_post_meta( $attachment_id, '_wp_attached_file', true );
+
+				if ( ! empty( $attached_file_meta ) ) {
+					$constructed_path = $upload_dir['basedir'] . '/' . $attached_file_meta;
+					if ( file_exists( $constructed_path ) ) {
+						$original_file_path = $constructed_path;
+					}
 				}
 			}
 		}
 		
 		// Validate that we have a local file path, not a CDN URL.
 		if ( empty( $original_file_path ) || strpos( $original_file_path, 'http://' ) === 0 || strpos( $original_file_path, 'https://' ) === 0 ) {
-			$this->logger->error( "Cannot submit job for attachment {$attachment_id}: Invalid file path (CDN URL or empty). Passed path: {$file_path}, Resolved path: {$original_file_path}" );
-			$this->update_job_state( $attachment_id, 'failed' );
+			$message = "Cannot submit job for attachment {$attachment_id}: Invalid file path (CDN URL or empty). Passed path: {$file_path}, Resolved path: {$original_file_path}";
+			$this->logger->error( $message );
+			AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
 			return;
 		}
 		
 		// Ensure the file exists locally before submitting.
 		if ( ! file_exists( $original_file_path ) ) {
-			$this->logger->error( "Cannot submit job for attachment {$attachment_id}: Original file does not exist at path: {$original_file_path}" );
-			$this->update_job_state( $attachment_id, 'failed' );
+			$message = "Cannot submit job for attachment {$attachment_id}: Original file does not exist at path: {$original_file_path}";
+			$this->logger->error( $message );
+			AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
 			return;
 		}
 		
@@ -257,76 +267,12 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 		$file_path = $original_file_path;
 
 		// Get mimetype for file type detection.
-		$mimetype = get_post_mime_type( $attachment_id );
-		if ( ! $mimetype ) {
-			$mimetype = wp_check_filetype( $file_path )['type'] ?? '';
-		}
-		
-		// Determine file type based on MIME type.
-		// All standard image MIME types start with 'image/' (e.g., image/jpeg, image/png, image/webp, image/avif).
-		// All standard video MIME types start with 'video/' (e.g., video/mp4, video/webm, video/ogg).
-		$is_image = ! empty( $mimetype ) && strpos( $mimetype, 'image/' ) === 0;
-		$is_video = ! empty( $mimetype ) && strpos( $mimetype, 'video/' ) === 0;
-
-		// Auto-convert checks are handled in upload hooks.
-		// This method is called after those checks, so we only need to verify file type support.
-		// For non-image/non-video files, we still process them for CDN storage.
-
-		// Get formats to process.
-		$formats = [];
-		if ( $is_image ) {
-			$formats = Settings::get_image_formats();
-		} elseif ( $is_video ) {
-			$formats = Settings::get_video_formats();
+		$mimetype = wp_check_filetype( $file_path )['type'] ?? '';
+		if ( empty( $mimetype ) ) {
+			$mimetype = get_post_mime_type( $attachment_id );
 		}
 
-		// Build operations array.
-		$operations = [];
-		
-		if ( $is_image ) {
-			// Get all image sizes with metadata.
-			$metadata = wp_get_attachment_metadata( $attachment_id );
-			
-			// Always include full size operation.
-			$full_operation = [
-				'formats'  => $formats,
-				'key_name' => 'full',
-			];
-			
-			$operations[] = $full_operation;
-			
-			// Add operations for each WordPress image size.
-			if ( ! empty( $metadata['sizes'] ) && is_array( $metadata['sizes'] ) ) {
-				foreach ( $metadata['sizes'] as $size_name => $size_data ) {
-					$operation = [
-						'formats'  => $formats,
-						'key_name' => $size_name,
-					];
-					
-					// Add resize dimensions if available.
-					if ( isset( $size_data['width'] ) && isset( $size_data['height'] ) ) {
-						$operation['resize'] = [
-							'width'  => (int) $size_data['width'],
-							'height' => (int) $size_data['height'],
-						];
-					}
-					
-					$operations[] = $operation;
-				}
-			}
-		} elseif($is_video) {
-			// Videos only have full size.
-			$operations[] = [
-				'formats'  => $formats,
-				'key_name' => 'full',
-			];
-		} else {
-			// For all other file types, send simple CDN storage operation.
-			// The 'full' key_name is reserved and the original file is automatically preserved under it.
-			$operations[] = [
-				'key_name' => 'full',
-			];
-		}
+		$operations = ExternalOperationsBuilder::build_for_attachment( $attachment_id );
 		// Update state to 'queued' before submission.
 		$this->update_job_state( $attachment_id, 'queued' );
 
@@ -334,9 +280,9 @@ class ExternalProcessingService implements ProcessingServiceInterface {
 		$result = $this->api_client->submit_job( $attachment_id, $operations, $mimetype );
 		
 		if ( ! $result['success'] ) {
-			// Update state to 'failed' on submission error.
-			$this->update_job_state( $attachment_id, 'failed' );
-			$this->logger->error( "Failed to submit job for attachment {$attachment_id}: " . ( $result['error'] ?? 'Unknown error' ) );
+			$message = "Failed to submit job for attachment {$attachment_id}: " . ( $result['error'] ?? 'Unknown error' );
+			AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
+			$this->logger->error( $message );
 			return;
 		}
 

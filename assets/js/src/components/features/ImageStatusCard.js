@@ -106,6 +106,73 @@ const ImageStatusCard = ({ status, loading, error }) => {
     );
   };
 
+  const getHeicTooltip = (supported) => {
+    return supported
+      ? __(
+          'Imagick can decode static HEIC/HEIF (libheif 1.18.2+ recommended for iOS gain-map photos) and convert them to WebP/AVIF per your format settings. Typical iPhone stills use this path. Live Photos (HEIC + MOV) are not supported.',
+          'flux-media-optimizer'
+        )
+      : __(
+          'HEIC/HEIF decode requires Imagick with libheif 1.18.2+. GD cannot read HEIC files. WebP/AVIF chips above only cover output formats, not HEIC input.',
+          'flux-media-optimizer'
+        );
+  };
+
+  const getAnimatedHeicTooltip = (supported) => {
+    return supported
+      ? __(
+          'Animated HEIF sequences (msf1) convert to animated WebP via FFmpeg (libwebp_anim) when WebP output is enabled. Not video or GIF. If WebP is disabled or FFmpeg is missing, sequences become static first-frame WebP/AVIF. AVIF is never animated for these sources.',
+          'flux-media-optimizer'
+        )
+      : __(
+          'Animated HEIF sequences need FFmpeg with libwebp_anim. Without it, sequences fall back to static first-frame conversion when WebP/AVIF are enabled. Static HEIC may still work when Imagick+libheif is available.',
+          'flux-media-optimizer'
+        );
+  };
+
+  const renderHeicChips = (processor) => {
+    const heicSupport = processor.heic_support === true;
+    const animatedHeicSupport = processor.animated_heic_support === true;
+    const heicCoupled = heicSupport === animatedHeicSupport;
+
+    if (heicCoupled) {
+      return (
+        <Grid item>
+          <Tooltip title={getHeicTooltip(heicSupport)} arrow>
+            <Chip
+              label="HEIC"
+              color={heicSupport ? 'success' : 'error'}
+              size="small"
+            />
+          </Tooltip>
+        </Grid>
+      );
+    }
+
+    return (
+      <>
+        <Grid item>
+          <Tooltip title={getHeicTooltip(heicSupport)} arrow>
+            <Chip
+              label="HEIC"
+              color={heicSupport ? 'success' : 'error'}
+              size="small"
+            />
+          </Tooltip>
+        </Grid>
+        <Grid item>
+          <Tooltip title={getAnimatedHeicTooltip(animatedHeicSupport)} arrow>
+            <Chip
+              label="Animated HEIC"
+              color={animatedHeicSupport ? 'success' : 'error'}
+              size="small"
+            />
+          </Tooltip>
+        </Grid>
+      </>
+    );
+  };
+
   // Safely access nested properties with fallbacks
   const imageProcessor = status.imageProcessor || {};
 
@@ -185,6 +252,7 @@ const ImageStatusCard = ({ status, loading, error }) => {
                           />
                         </Tooltip>
                       </Grid>
+                      {renderHeicChips(processor)}
                     </Grid>
                   </Box>
                 ))}

@@ -152,6 +152,39 @@ class WebhookAuthServiceTest extends TestCase {
 	}
 
 	/**
+	 * Completed webhook CDN URLs must use HTTPS even when the host is allowlisted.
+	 *
+	 * @since 4.3.0
+	 * @return void
+	 */
+	public function testValidateUrlHostRequiresHttps() {
+		$allowed = [ 'cdn.fluxplugins.com' ];
+
+		$this->assertSame(
+			'CDN URL must use HTTPS',
+			WebhookAuthService::validate_url_host( 'http://cdn.fluxplugins.com/path/file.webp', $allowed )
+		);
+		$this->assertSame(
+			'CDN URL must use HTTPS',
+			WebhookAuthService::validate_url_host( '//cdn.fluxplugins.com/path/file.webp', $allowed )
+		);
+		$this->assertTrue(
+			WebhookAuthService::validate_url_host( 'https://cdn.fluxplugins.com/path/file.webp', $allowed )
+		);
+	}
+
+	/**
+	 * Invalid rate-limit constants fail closed instead of allowing unlimited webhooks.
+	 *
+	 * @since 4.3.0
+	 * @return void
+	 */
+	public function testIsWithinRateLimitRejectsInvalidMax() {
+		$this->assertFalse( WebhookAuthService::is_within_rate_limit( 0, 0 ) );
+		$this->assertFalse( WebhookAuthService::is_within_rate_limit( 0, -1 ) );
+	}
+
+	/**
 	 * Test is_host_allowed helper.
 	 *
 	 * @since 4.1.6

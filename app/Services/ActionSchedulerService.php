@@ -89,6 +89,7 @@ class ActionSchedulerService {
 	 * Register Action Scheduler action hooks.
 	 *
 	 * @since 3.0.0
+	 * @since 4.3.0 Retry hook registration moved to ConversionRetryService::init().
 	 * @return void
 	 */
 	private function register_action_hooks() {
@@ -117,7 +118,7 @@ class ActionSchedulerService {
 		}
 
 		// Check if discovery action is already scheduled.
-		$next_scheduled = as_next_scheduled_action( 'flux_media_optimizer_bulk_discovery' );
+		$next_scheduled = as_next_scheduled_action( 'flux_media_optimizer_bulk_discovery', [], ActionSchedulerGroups::MEDIA_OPTIMIZER );
 		
 		if ( $next_scheduled ) {
 			// Already scheduled, return timestamp (indicates it's scheduled).
@@ -131,7 +132,7 @@ class ActionSchedulerService {
 			20 * MINUTE_IN_SECONDS,
 			'flux_media_optimizer_bulk_discovery',
 			[],
-			'flux-media-optimizer'
+			ActionSchedulerGroups::MEDIA_OPTIMIZER
 		);
 
 		if ( $action_id ) {
@@ -156,7 +157,7 @@ class ActionSchedulerService {
 	 */
 	public function schedule_attachment_conversion( $attachment_id, $time ) {
 		// Check if action is already scheduled for this attachment.
-		$next_scheduled = as_next_scheduled_action( 'flux_media_optimizer_convert_attachment', [ 'attachment_id' => $attachment_id ] );
+		$next_scheduled = as_next_scheduled_action( 'flux_media_optimizer_convert_attachment', [ 'attachment_id' => $attachment_id ], ActionSchedulerGroups::MEDIA_OPTIMIZER );
 		
 		if ( $next_scheduled ) {
 			// Already scheduled, return timestamp (indicates it's scheduled).
@@ -168,7 +169,7 @@ class ActionSchedulerService {
 			$time,
 			'flux_media_optimizer_convert_attachment',
 			[ 'attachment_id' => $attachment_id ],
-			'flux-media-optimizer'
+			ActionSchedulerGroups::MEDIA_OPTIMIZER
 		);
 
 		if ( $action_id ) {
@@ -190,7 +191,7 @@ class ActionSchedulerService {
 	 * @return void
 	 */
 	public function cancel_attachment_conversion( $attachment_id ) {
-		as_unschedule_action( 'flux_media_optimizer_convert_attachment', [ 'attachment_id' => $attachment_id ] );
+		as_unschedule_action( 'flux_media_optimizer_convert_attachment', [ 'attachment_id' => $attachment_id ], ActionSchedulerGroups::MEDIA_OPTIMIZER );
 		$this->logger->debug( "Cancelled scheduled conversion action for attachment {$attachment_id}" );
 	}
 

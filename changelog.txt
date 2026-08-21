@@ -1,3 +1,17 @@
+= 4.3.0 =
+* Feature: Local HEIC/HEIF conversion with Imagick decode (libheif 1.18.2+ recommended for modern iOS photos), optional animated HEIF-to-WebP via FFmpeg, and separate HEIC capability reporting.
+* Feature: Unified Action Scheduler retries for local and cloud failures (3 automatic attempts with progressive backoff), with processing routed by current license/settings and Flux logging on failures.
+* Feature: Redesigned attachment details panel with async REST loading, compact skeleton placeholder, MUI Grid responsive layout that stays within the WordPress container, size accordion, format URLs, and a license-aware CDN upsell.
+* Feature: Attachment details poll every 15 seconds while Pending (including locally deferred video conversions) and refresh Convert/Disable/Enable actions in place without a full page reload.
+* Feature: Attachment details show only formats enabled and supported by the active media converter (WebP/AVIF for images, AV1/WebM for videos), with per-size savings badges compared to the same-size original.
+* Feature: Attachment details and conversion controls use WordPress `edit_post` attachment capabilities.
+* Fix: External processing activation requires a valid license (`is_external_processing_active`); uninstall removes the correct option keys while preserving shared suite account ID; safer database table-drop SQL; external operations builder hardening.
+* Fix: Image conversion commits files and metadata/statistics together; skipped retry dispatches no longer consume the retry budget; plugin and common external API URL/timeout constants stay aligned before shared client init.
+
+= 4.2.0 =
+* Feature: Media Library shows optimization status and filter options (Optimized, Pending, Failed, Disabled, Unprocessed). Conversion stats API now reports failed external job counts. New constants added: FLUX_MEDIA_OPTIMIZER_STALE_JOB_THRESHOLD, FLUX_MEDIA_OPTIMIZER_FAILED_JOB_RETRY_LIMIT, FLUX_MEDIA_OPTIMIZER_CLEANUP_BATCH_SIZE.
+* Feature: Daily cleanup cron recovers stale external jobs, automatically retries failed jobs with a set limit, and cleans expired admin notices.
+
 = 4.1.6 =
 * Security: Harden external webhook endpoint (account ID verification in permission_callback, job-state checks, CDN host allowlist, rate limiting).
 * Security: Register webhook route only when external service is enabled and license is valid.

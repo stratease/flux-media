@@ -11,8 +11,8 @@
 
 namespace FluxMedia\App\Services;
 
+use FluxMedia\App\Services\Settings;
 use FluxMedia\FluxPlugins\Common\Logger\Logger;
-use FluxMedia\FluxPlugins\Common\License\LicenseService;
 
 /**
  * Media processing service locator.
@@ -133,9 +133,8 @@ class MediaProcessingServiceLocator {
 	 * @return void
 	 */
 	public function init() {
-		$license_service = LicenseService::get_instance();
-		// Initialize external provider if external service is enabled and license is valid.
-		if ( Settings::is_external_service_enabled() && $license_service->is_license_valid() ) {
+		// Initialize external provider when outbound cloud processing is active.
+		if ( Settings::is_external_processing_active() ) {
 			$this->external_provider = new ExternalOptimizationProvider( $this->logger );
 			$this->external_provider->init();
 		}
@@ -152,9 +151,7 @@ class MediaProcessingServiceLocator {
 	 * @return ProcessingServiceInterface Processing service instance.
 	 */
 	public function get_processor() {
-		$license_service = LicenseService::get_instance();
-		// Check if external service is enabled and license is valid.
-		if ( Settings::is_external_service_enabled() && $license_service->is_license_valid() ) {
+		if ( Settings::is_external_processing_active() ) {
 			return $this->get_external_service();
 		}
 

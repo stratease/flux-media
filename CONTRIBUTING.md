@@ -24,7 +24,7 @@ npm run dev
 
 ## 🏗️ Architecture Overview
 
-This plugin has been completely refactored with a modern, decoupled architecture that separates business logic from WordPress dependencies, making it highly maintainable, testable, and ready for SaaS API integration.
+This plugin has been completely refactored with a modern, decoupled architecture that separates business logic from WordPress dependencies, making it highly maintainable and testable. Optional Flux cloud processing and CDN are available when licensed; local optimization remains the default.
 
 ### Key Architectural Changes
 
@@ -48,16 +48,16 @@ This plugin has been completely refactored with a modern, decoupled architecture
 - **WordPress i18n**: Full internationalization support
 - **Skeleton Loading**: Professional loading states
 
-#### 4. **SaaS API Integration Ready**
-- **License Key Storage**: License key field available for future SaaS API authentication (currently unused)
+#### 4. **Optional Flux cloud processing**
+- **License**: Suite license via flux-plugins-common gates **optional** outbound cloud processing / CDN only — not local optimization, settings, Media Library status, or logs
 - **Privacy Compliant**: Full compliance with WordPress.org SaaS guidelines
-- **Future-Ready**: Architecture prepared for optional cloud processing integration (opt-in only)
-- **Local-First**: All functionality works locally without any external dependencies
+- **Local-First**: All core functionality works locally without any external service
 
 #### 5. **Shared Library Architecture**
 - **Flux Plugins Common**: This plugin uses `flux-plugins-common` for shared services across the Flux Plugins suite
 - **Shared Services**: Menu system, account ID management, logging, and API client are provided by the shared library
 - **Namespace Prefixing**: The shared library is namespace-prefixed using Strauss to avoid conflicts
+- **Test / fixture layout**: See [Plugin test surfaces and runtime fixtures](https://github.com/stratease/flux-plugins-common/blob/master/README.md#plugin-test-surfaces-and-runtime-fixtures) in the common README (PHPUnit + ephemeral only; `assets/fixtures/` is runtime)
 - **Repository**: See [flux-plugins-common repository](https://github.com/stratease/flux-plugins-common) for detailed documentation
 
 ##### Hook Naming Convention
@@ -86,49 +86,36 @@ For complete hook naming guidelines, see: https://github.com/stratease/flux-plug
 flux-media-optimizer/
 ├── app/                          # Main application code
 │   ├── Services/                 # Business logic services
-│   │   ├── ImageConverter.php    # Pure image conversion logic
-│   │   ├── VideoConverter.php    # Pure video conversion logic
-│   │   ├── WordPressProvider.php # WordPress integration layer
-│   │   ├── WordPressImageRenderer.php # Image rendering service
-│   │   ├── WordPressVideoRenderer.php # Video rendering service
-│   │   ├── ConversionTracker.php # Conversion tracking
-│   │   ├── AttachmentMetaHandler.php # Attachment meta data handler
-│   │   ├── AttachmentIdResolver.php # Attachment ID resolution utilities
-│   │   ├── GifAnimationDetector.php # GIF animation detection
-│   │   ├── BulkConverter.php     # Bulk conversion processing
-│   │   ├── Settings.php          # Centralized settings management
-│   │   ├── LocalProcessingService.php # Local media processing service
-│   │   ├── ExternalProcessingService.php # External API processing service
-│   │   ├── MediaProcessingServiceLocator.php # Service locator for processing services
-│   │   ├── ActionSchedulerService.php # Action Scheduler integration
-│   │   ├── ExternalApiClient.php # External API client wrapper
-│   │   ├── ExternalOptimizationProvider.php # External optimization provider
-│   │   ├── Database.php          # Database service
-│   │   ├── ProcessingServiceInterface.php # Processing service interface
-│   │   ├── ProcessorDetector.php # Processor detection utilities
-│   │   ├── ProcessorTypes.php    # Processor type constants
-│   │   ├── FormatSupportDetector.php # Format support detection
-│   │   ├── FFmpegAutoloader.php  # FFmpeg autoloader
-│   │   ├── AV1Format.php         # AV1 format support
-│   │   ├── Converter.php         # Universal converter interface
-│   │   ├── ImageProcessorInterface.php # Image processor interface
-│   │   ├── VideoProcessorInterface.php # Video processor interface
-│   │   └── Format/               # Format-specific classes
-│   ├── Http/                     # REST API controllers
-│   │   └── Controllers/          # Individual API controllers
-│   ├── Interfaces/               # Contract definitions
-│   │   └── Converter.php         # Universal converter interface
-│   └── Processors/               # Image/video processors
-│       ├── GDProcessor.php       # GD image processor
-│       ├── ImagickProcessor.php  # Imagick processor
-│       └── FFmpegProcessor.php   # FFmpeg video processor
-├── assets/js/src/                # React frontend
-│   ├── components/               # React components
-│   ├── hooks/                    # Custom React hooks
-│   ├── contexts/                 # React Context providers
-│   └── services/                 # API services
-└── tests/                        # Test files
+│   │   ├── ImageConverter.php
+│   │   ├── VideoConverter.php
+│   │   ├── WordPressProvider.php
+│   │   ├── ConversionOrchestrator.php
+│   │   ├── ConversionRetryService.php
+│   │   ├── ConversionArtifactTransaction.php
+│   │   ├── AttachmentDetailsPresenter.php
+│   │   ├── AttachmentDetailsMountRenderer.php
+│   │   ├── HeifCapabilityProbe.php
+│   │   ├── MediaLibraryStatusService.php
+│   │   ├── CleanupService.php
+│   │   ├── AdminScriptUrl.php
+│   │   ├── LocalProcessingService.php
+│   │   ├── ExternalProcessingService.php
+│   │   └── …                     # Other converters, processors, settings
+│   ├── Http/Controllers/         # REST API controllers
+│   └── Processors/               # GD / Imagick / FFmpeg processors
+├── assets/
+│   ├── fixtures/                 # Runtime probes (e.g. HEIF sequence) — ships in zip
+│   └── js/{src,dist}/            # React admin + attachment island
+├── src/assets/common/            # Copied common runtime JS/images
+├── bin/                          # Strauss helpers; build/deploy via ./vendor/bin/*
+├── tests/
+│   ├── unit/                     # PHPUnit
+│   ├── _support/files/           # Test-only samples
+│   └── ephemeral/                # Docs for ephemeral-wp-test checks
+└── …
 ```
+
+Suite-wide layout rules (PHPUnit vs ephemeral, `assets/fixtures/`): [flux-plugins-common README](https://github.com/stratease/flux-plugins-common/blob/master/README.md#plugin-test-surfaces-and-runtime-fixtures).
 
 ## 🔧 Core Services Architecture
 
@@ -213,12 +200,12 @@ The plugin includes a sophisticated GIF animation detector:
 
 3. **Test your changes**:
    ```bash
-   # Run PHP tests
-   ./vendor/bin/phpunit
-   
-   # Run frontend tests (when implemented)
-   npm test
-   
+   # Run PHP unit tests
+   composer test
+
+   # Ephemeral Playwright smoke/regression (requires local ephemeral-wp-test checkout)
+   npm run test:ephemeral:smoke
+
    # Lint code
    npm run lint
    composer run lint
@@ -360,6 +347,7 @@ Plugin endpoints are prefixed with `/wp-json/flux-media-optimizer/v1/`:
 - `GET /options` - Plugin options
 - `POST /options` - Update plugin options
 - `GET /conversions/stats` - Conversion statistics
+- `GET /attachments/{id}/details` - Attachment optimization panel payload
 
 Logs: `GET /wp-json/flux-plugins-common/v1/logs` (see flux-plugins-common `RestApiService`)
 

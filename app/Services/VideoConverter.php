@@ -594,7 +594,9 @@ class VideoConverter implements Converter {
 
             // Video conversion completed
         } elseif ( ! $results['success'] && $attachment_id ) {
-            $this->logger->error( "Video conversion failed for attachment {$attachment_id}: " . implode( ', ', $results['errors'] ) );
+            $message = "Video conversion failed for attachment {$attachment_id}: " . implode( ', ', $results['errors'] );
+            $this->logger->error( $message );
+            AttachmentMetaHandler::mark_conversion_failed( $attachment_id, $message );
         }
 
         return $results;
